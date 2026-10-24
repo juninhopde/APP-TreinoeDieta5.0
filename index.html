@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Controle — Dieta, Treino e Coach</title>
-<meta name="app-versao" content="5.0.1">
+<meta name="app-versao" content="5.2.1">
 <meta name="description" content="Controle: dieta, treino e coach com plano montado para o seu perfil. Funciona offline e guarda os dados só no seu aparelho.">
 
 <link rel="manifest" href="manifest.webmanifest">
@@ -122,10 +122,16 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
+<!-- Relatório da semana: só aparece na impressão (Salvar como PDF) -->
+<div id="relatorio" hidden></div>
+
 <input type="file" id="arq-progresso" accept="image/*" class="oculto">
+<input type="file" id="arq-prato" accept="image/*" class="oculto">
 
 <script src="js/dados.js"></script>
 <script src="js/dados-extra.js"></script>
+<script src="js/alimentos-mais.js"></script>
+<script src="js/restricoes.js"></script>
 <script src="js/treino.js"></script>
 <script src="js/perfil-core.js"></script>
 <script src="js/fotos.js"></script>
@@ -144,6 +150,9 @@
 <script src="js/assistente.js"></script>
 <script src="js/ia-externa.js"></script>
 <script src="js/ia-local.js"></script>
+<script src="js/foto-prato.js"></script>
+<script src="js/habitos.js"></script>
+<script src="js/backup.js"></script>
 <script src="js/onboarding.js"></script>
 <script src="js/app.js"></script>
 

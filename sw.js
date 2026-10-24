@@ -14,16 +14,16 @@
    Food Facts nunca passam por aqui.
    ══════════════════════════════════════════════════════════ */
 
-const VERSAO = '5.0.1';
+const VERSAO = '5.2.1';
 const CACHE_NAME = 'ctrl-app-' + VERSAO;
 const PRAZO_REDE_MS = 4000;
 
 const ARQUIVOS = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
-  './js/dados.js', './js/dados-extra.js', './js/treino.js', './js/perfil-core.js', './js/fotos.js',
+  './js/dados.js', './js/dados-extra.js', './js/alimentos-mais.js', './js/restricoes.js', './js/treino.js', './js/perfil-core.js', './js/fotos.js',
   './js/metabolismo.js', './js/off.js', './js/analise2.js', './js/diagnostico.js', './js/cardapio.js',
   './js/coach.js', './js/registro-nl.js', './js/agente.js', './js/memoria.js', './js/fases.js',
-  './js/jejum.js', './js/saber.js', './js/assistente.js', './js/ia-externa.js', './js/ia-local.js',
+  './js/jejum.js', './js/saber.js', './js/assistente.js', './js/ia-externa.js', './js/ia-local.js', './js/foto-prato.js', './js/habitos.js', './js/backup.js',
   './js/onboarding.js', './js/app.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png'
 ];
@@ -59,7 +59,9 @@ self.addEventListener('fetch', event => {
     const cache = await caches.open(CACHE_NAME);
     try {
       const resposta = await Promise.race([
-        fetch(req),
+        // "no-cache" revalida com o servidor (ETag) em vez de reaproveitar o cache HTTP do navegador:
+        // sem isso, depois de uma publicação o app podia misturar arquivos novos e antigos por alguns minutos
+        fetch(req, { cache: 'no-cache' }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('prazo')), PRAZO_REDE_MS))
       ]);
       if (resposta && resposta.ok) cache.put(req, resposta.clone());

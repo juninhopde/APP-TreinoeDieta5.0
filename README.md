@@ -7,6 +7,32 @@ Os dados ficam no aparelho.
 
 ---
 
+## Versão 5.2.0 — ganho de massa, recuperação, hábitos e backup
+
+- **Ganhar massa.** Nova opção no primeiro acesso e nova fase do plano: superávit pequeno e controlado
+  (0,25% a 0,4% do peso por semana, no máximo 15% do gasto e 500 kcal), proteína 1,8 g/kg e diagnóstico
+  próprio de ritmo ("rápido demais" vira gordura). Com IMC acima de 27 o app não monta superávit e segue
+  em manutenção com treino de força (recomposição).
+- **Check-in de recuperação.** Sono, energia, estresse, dor e fome em 10 segundos (também por frase no
+  chat: "dormi mal"). Com recuperação baixa, o coach sugere a versão leve do treino (uma série a menos).
+- **Sequências, conquistas e revisão da semana.** A sequência dá 1 folga a cada 7 dias seguidos. A revisão
+  mostra o que foi bem e um único ajuste, e o relatório sai em PDF (impressão do navegador) ou texto.
+- **Backup.** Cópia automática diária no aparelho (7 mais recentes, com restauração), aviso de backup em
+  arquivo vencido e compartilhamento pelo menu do celular. A cópia automática não protege de limpar os
+  dados do navegador: para isso vale o arquivo.
+- **Lembretes no calendário.** Um app web sem servidor não notifica com o app fechado. O botão "Levar para
+  o calendário do celular (.ics)" em Ajustes leva os lembretes para o calendário, com alarme na hora certa.
+- **Atualização sempre fresca.** O service worker revalida os arquivos a cada abertura, sem misturar versões.
+
+## Versão 5.1.0 — foto do prato e base maior
+
+- **Foto do prato (IA).** Botão na tela Hoje: a foto vai ao provedor de IA da própria pessoa (Gemini, OpenAI
+  ou Claude, com a chave dela, e só depois de um aviso de privacidade) e volta como lista de alimentos com
+  gramas estimadas, numa prévia editável. Nada é gravado sem conferência. Arquivo: `js/foto-prato.js`.
+- **Mais de 660 alimentos novos** em `js/alimentos-mais.js` (pratos, marmitas, suplementos, bebidas, doces,
+  padaria, fast-food). Valores aproximados (margem de cerca de 10%); suplementos, marmitas e itens de
+  restaurante variam por marca e porção, confira no rótulo.
+
 ## Versão 5.0.1 — correções, segurança e acabamento
 
 - **Segurança.** O Safety Engine passou a reconhecer autolesão e suicídio (CVV 188, SAMU 192), dieta e
