@@ -14,7 +14,7 @@
    Food Facts nunca passam por aqui.
    ══════════════════════════════════════════════════════════ */
 
-const VERSAO = '5.5.0';
+const VERSAO = '5.5.3';
 const CACHE_NAME = 'ctrl-app-' + VERSAO;
 const PRAZO_REDE_MS = 4000;
 
@@ -25,7 +25,7 @@ const ARQUIVOS = [
   './js/coach.js', './js/registro-nl.js', './js/agente.js', './js/memoria.js', './js/fases.js',
   './js/jejum.js', './js/saber.js', './js/assistente.js', './js/ia-externa.js', './js/ia-local.js', './js/foto-prato.js', './js/habitos.js', './js/pilares.js', './js/trocas.js','./js/backup.js', './js/treino-pdf.js',
   './js/onboarding.js', './js/app.js',
-  './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png'
+  './icons/icon-v2-192.png', './icons/icon-v2-512.png', './icons/icon-v2-maskable-512.png'
 ];
 
 self.addEventListener('install', event => {
