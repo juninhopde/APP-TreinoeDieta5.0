@@ -90,14 +90,10 @@ const IAChave = {
 };
 
 /* ── erros em português ────────────────────────────── */
-const _MSG_CHAVE_INVALIDA = 'Chave inválida: contém caracteres não permitidos (espaço, acento ou aspas copiados junto). Cole de novo só a chave.';
-
 function _erroIA(prov, status, corpo, e) {
   const nome = (IA_PROVEDORES[prov] || {}).rot || prov;
   if (e) {
     if (e.name === 'AbortError') return new Error(nome + ' não respondeu em ' + Math.round(IA_TIMEOUT_MS / 1000) + ' segundos.');
-    // o navegador recusa o cabeçalho antes de sair da rede: não é falta de internet
-    if (e.name === 'TypeError' && /ISO-8859-1|ByteString|code point/i.test(e.message || '')) return new Error(_MSG_CHAVE_INVALIDA);
     return new Error('Sem conexão com ' + nome + ' (ou bloqueio de rede). Verifique a internet.');
   }
   let det = '';
@@ -119,23 +115,17 @@ function _erroIA(prov, status, corpo, e) {
 async function _fetchIA(prov, url, opts) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), IA_TIMEOUT_MS);
-  /* O prazo vale até o fim da leitura do corpo: um provedor que manda o cabeçalho
-     e trava no meio do texto não pode deixar a conversa em "…" para sempre. */
-  try {
-    let r, txt;
-    try { r = await fetch(url, Object.assign({}, opts, { signal: ctl.signal })); }
-    catch (e) { throw _erroIA(prov, 0, null, e); }
-    try { txt = await r.text(); }
-    catch (e) { throw _erroIA(prov, 0, null, e); }
-    if (!r.ok) throw _erroIA(prov, r.status, txt);
-    try { return JSON.parse(txt); } catch (e) { throw new Error('Resposta inesperada do provedor (não é JSON).'); }
-  } finally { clearTimeout(t); }
+  let r;
+  try { r = await fetch(url, Object.assign({}, opts, { signal: ctl.signal })); }
+  catch (e) { clearTimeout(t); throw _erroIA(prov, 0, null, e); }
+  clearTimeout(t);
+  const txt = await r.text();
+  if (!r.ok) throw _erroIA(prov, r.status, txt);
+  try { return JSON.parse(txt); } catch (e) { throw new Error('Resposta inesperada do provedor (não é JSON).'); }
 }
 
 function _headersIA(prov, chave) {
   const p = IA_PROVEDORES[prov];
-  // chave de API é ASCII visível; qualquer outra coisa o navegador recusa no cabeçalho
-  if (/[^\x21-\x7e]/.test(chave)) throw new Error(_MSG_CHAVE_INVALIDA);
   if (p.tipo === 'gemini') return { 'Content-Type': 'application/json', 'x-goog-api-key': chave };
   if (p.tipo === 'anthropic') return {
     'Content-Type': 'application/json', 'x-api-key': chave, 'anthropic-version': '2023-06-01',
@@ -230,18 +220,12 @@ const _TOM_IA = {
   hard: 'Tom duro, sem rodeio, mas sempre respeitoso.', hardmax: 'Resposta curtíssima, só o essencial.'
 };
 
-/* Limites que valem para qualquer provedor e qualquer tom. O modelo externo não passa
-   pelo Safety Engine ao responder: esta cláusula é a única barreira do lado dele. */
-const _REGRAS_IA = 'Regras fixas: não indique medicamento, dose, hormônio nem jejum prolongado, e não faça diagnóstico de doença; se pedirem, recuse com gentileza e mande procurar médico. ' +
-  'Se a pessoa relatar dor no peito, desmaio, vontade de se machucar ou transtorno alimentar, oriente SAMU 192 ou CVV 188 e não proponha dieta nem treino. ' +
-  'Nunca sugira meta calórica muito baixa nem perda de peso acelerada.';
-
 async function perguntarIA(prov, modelo, sistema, pergunta, intensidade, opts) {
   opts = opts || {};
   const p = IA_PROVEDORES[prov]; if (!p) throw new Error('Provedor desconhecido.');
   const chave = IAChave.ler(prov); if (!chave) throw new Error('Nenhuma chave salva para ' + p.rot + '.');
   modelo = modelo || p.modeloPadrao;
-  const sis = String(sistema || '') + '\n\n' + _REGRAS_IA + '\n\nResponda em português do Brasil, em texto simples e curto. ' + (_TOM_IA[intensidade] || '');
+  const sis = String(sistema || '') + '\n\nResponda em português do Brasil, em texto simples e curto. ' + (_TOM_IA[intensidade] || '');
   const max = opts.maxTokens || 1200;
 
   if (p.tipo === 'gemini') {
@@ -262,25 +246,19 @@ async function perguntarIA(prov, modelo, sistema, pergunta, intensidade, opts) {
     const tentar = async (mod) => {
       if (opts.permitirBusca === true) {
         try { const t = await chamar(mod, true); if (t) return t; }
-        catch (e) {
-          /* Só repete sem busca quando o problema pode ser a própria busca (400: ferramenta não
-             aceita pelo modelo). Cota (429), instabilidade (5xx), chave ou modelo inexistente
-             repetidos sem busca só gastariam mais cota: o laço de modelos decide o que fazer. */
-          if (!e || e.status !== 400) throw e;
-        }
+        catch (e) { if (e && e.status === 404) throw e; /* busca indisponível ou modelo instável: repete sem ela */ }
       }
       const t = await chamar(mod, false);
       if (!t) throw new Error('O Gemini respondeu vazio.');
       return t;
     };
 
-    /* Ordem de tentativa: o modelo pedido (com troca de aposentado), o último que respondeu,
-       e os conhecidos. O escolhido em Ajustes vem primeiro; o "último que respondeu" só serve
-       de reserva. Modelo sobrecarregado (503/429) passa para o próximo na hora; se nenhum
-       responder, uma última tentativa no primeiro, após uma pausa curta (menos em 429). */
+    /* Ordem de tentativa: o último que respondeu, o pedido (com troca de aposentado), e os
+       conhecidos. Modelo sobrecarregado (503/429) passa para o próximo na hora; se nenhum
+       responder, uma última tentativa no primeiro, após uma pausa curta. */
     const fila = [];
     const poe = m => { if (m && !fila.includes(m)) fila.push(m); };
-    poe(_substLer(prov, modelo)); poe(_okLer(prov)); poe(p.modeloPadrao); poe('gemini-3.5-flash');
+    poe(_okLer(prov)); poe(_substLer(prov, modelo)); poe(p.modeloPadrao); poe('gemini-3.5-flash');
     let descobriu = false, ultimoErro = null;
     for (let i = 0; i < fila.length; i++) {
       const mod = fila[i];
@@ -300,7 +278,7 @@ async function perguntarIA(prov, modelo, sistema, pergunta, intensidade, opts) {
         if (!(e.status === 404 || _TRANSITORIO(e.status))) throw e;
       }
     }
-    if (ultimoErro && _TRANSITORIO(ultimoErro.status) && ultimoErro.status !== 429) {   // 429 não passa em 2,5 s; repetir só agrava
+    if (ultimoErro && _TRANSITORIO(ultimoErro.status)) {
       await new Promise(r => setTimeout(r, 2500));
       try { const t = await tentar(fila[0]); _okGravar(prov, fila[0]); return t; } catch (e) { ultimoErro = e; }
     }
