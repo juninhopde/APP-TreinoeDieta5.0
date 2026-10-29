@@ -896,7 +896,8 @@ function pintarHoje() {
     Escanear código de barras</button>
     <button type="button" class="btn foto-btn" id="foto-prato" style="margin-top:8px">
     <svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg>
-    Foto do prato (IA)</button>`;
+    Foto do prato (IA)</button>
+    <button type="button" class="btn vazado mini" id="foto-prato-galeria" style="margin-top:6px">ou escolher da galeria</button>`;
 
   REFS.forEach(r => {
     const itens = d.refs[r.id]||[], sr = somaRef(r.id);
@@ -3065,8 +3066,16 @@ function gravarPendente() {
 /* ── assistente: embutido por padrão, modelo local opcional ── */
 let chatHist = [];
 let modoLLM = false;
+let modoLLMDecidido = false;          // a escolha padrão é feita uma vez por abertura do app
 
 function abrirChat() {
+  /* Com chave de IA configurada, a conversa livre é o padrão. Se a chave falhar, a própria pergunta
+     é respondida pelo embutido e o modo desliga (veja o catch em enviar). "Voltar ao assistente
+     embutido" vale até fechar o app. */
+  if (!modoLLMDecidido) {
+    modoLLMDecidido = true;
+    if (IAChave.ler(E.cfg.iaProv)) modoLLM = true;
+  }
   const A = diagnosticar(ctxDiag());
   const sug = sugestoes(A);
   abrirGaveta(E.cfg.iaNome || 'Assistente', `
@@ -3078,8 +3087,12 @@ function abrirChat() {
     <div class="linha-flex" style="margin-top:9px">
       <input type="text" id="chat-in" placeholder="Pergunte sobre seus números…" autocomplete="off" maxlength="500" aria-label="Mensagem para o assistente">
       <button type="button" class="btn mini" id="chat-go">Enviar</button></div>
-    <p class="nota">Respostas montadas a partir do seu diagnóstico. Nada sai do aparelho e nada é estimado.
-    Assunto clínico eu não respondo — para isso, procure um profissional.</p>
+    ${modoLLM && IAChave.ler(E.cfg.iaProv)
+      ? `<p class="nota"><b>Conversa livre ligada.</b> Suas mensagens e um resumo dos seus números vão para
+    ${esc((IA_PROVEDORES[E.cfg.iaProv]||{}).rot || 'o provedor de IA')}, com a sua chave. Para manter tudo no aparelho,
+    use o botão abaixo. Assunto clínico eu não respondo — procure um profissional.</p>`
+      : `<p class="nota">Respostas montadas a partir do seu diagnóstico. Nada sai do aparelho e nada é estimado.
+    Assunto clínico eu não respondo — para isso, procure um profissional.</p>`}
     <button type="button" class="btn vazado mini" id="modo-llm">
       ${modoLLM ? 'Voltar ao assistente embutido'
         : IAChave.ler(E.cfg.iaProv) ? 'Conversa livre com ' + esc((IA_PROVEDORES[E.cfg.iaProv]||{}).rot || 'IA')
@@ -3948,10 +3961,11 @@ function ligarEventos() {
     if (v===0) pararCron(); else { cronFim += v*1000; tickCron(); }
   });
 
-  $('#arq-prato').addEventListener('change', e => {
+  // câmera (capture) e galeria usam o mesmo tratamento
+  ['#arq-prato', '#arq-prato-cam'].forEach(sel => $(sel).addEventListener('change', e => {
     const f = e.target.files[0]; e.target.value = '';
     if (f) fotoDoPrato(f);
-  });
+  }));
 
   $('#arq-progresso').addEventListener('change', async e => {
     const f = e.target.files[0]; e.target.value = '';
@@ -4024,7 +4038,8 @@ function ligarEventos() {
     }
     if (t.id==='ler-codigo') { refAlvo = 'almoco'; return abrirScanner(); }
     if (t.id==='add-foto')      { $('#arq-progresso').click(); return; }
-    if (t.closest('#foto-prato')) { $('#arq-prato').click(); return; }
+    if (t.closest('#foto-prato')) { $('#arq-prato-cam').click(); return; }          // abre a câmera direto
+    if (t.closest('#foto-prato-galeria')) { $('#arq-prato').click(); return; }
     if (t.id==='fp-ajustes')    { fecharGaveta(); irPara('ajustes'); return; }
     if (t.id==='add-cardio')    return abrirCardio();
     if (t.id==='btn-passos')    {
