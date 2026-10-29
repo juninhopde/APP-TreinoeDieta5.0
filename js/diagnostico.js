@@ -82,7 +82,17 @@ function diagnosticar(ctx) {
   /* Fases sem déficit (manutenção) não têm ritmo de perda, déficit realizado
      nem aderência a déficit para cobrar: peso estável é o resultado esperado. */
   const emDeficit = !ctx.fasePlano || ctx.fasePlano === 'perda' || ctx.fasePlano === 'recuperacao';
-  if (!emDeficit) {
+  /* Ganho de massa também não tem déficit (os achados de déficit abaixo ficam de fora, como
+     em manutenção) e troca a leitura de ritmo e consumo pelas versões de superávit. `G` escolhe
+     o texto: o primeiro valor vale para as demais fases, o segundo para o ganho. */
+  const emGanho = ctx.fasePlano === 'ganho';
+  const G = (normal, ganho) => emGanho ? ganho : normal;
+  if (emGanho) {
+    add('fase-ganho', 'neutro', 'Fase do plano',
+      'Você está na fase de ganho de massa: o plano tem um superávit pequeno e controlado, e o peso subindo devagar é o esperado.',
+      'O que decide o resultado é a combinação de superávit pequeno, proteína alta e treino de força com carga progressiva. Ganho de mais de 0,5% do peso por semana tende a ser gordura.');
+  }
+  if (!emDeficit && !emGanho) {
     add('sem-deficit', 'neutro', 'Fase do plano',
       'Você está na fase de manutenção: o plano não tem déficit, então peso estável é o esperado e não um problema.',
       'Se quiser voltar a perder peso, mude a fase em Progresso. Enquanto isso, o que importa é a tendência ficar dentro da faixa.');
@@ -120,7 +130,8 @@ function diagnosticar(ctx) {
       'Consistência do consumo',
       `Variação diária de ${Math.round(dp)} kcal em torno da média (${Math.round(cv*100)}%).`,
       cv <= 0.15 ? 'Rotina alimentar estável, que é o que faz a média semanal valer.'
-        : 'Oscilação alta. Dias muito acima cancelam dias muito abaixo e a semana fecha sem déficit, mesmo parecendo que teve.',
+        : G('Oscilação alta. Dias muito acima cancelam dias muito abaixo e a semana fecha sem déficit, mesmo parecendo que teve.',
+            'Oscilação alta. Dias muito abaixo cancelam o superávit e a semana fecha sem sobra, mesmo parecendo que teve. Em ganho, comer a meta todos os dias importa mais que acertar em alguns.'),
       Math.round(cv*100));
   }
 
@@ -135,7 +146,8 @@ function diagnosticar(ctx) {
       dif <= 200 ? 'ok' : dif <= 500 ? 'atencao' : 'critico',
       'Fim de semana',
       `${Math.round(mf)} kcal aos sábados e domingos contra ${Math.round(ms)} nos dias úteis — diferença de ${Math.round(dif)} kcal.`,
-      dif <= 200 ? 'O fim de semana não está sabotando a semana.'
+      dif <= 200 ? G('O fim de semana não está sabotando a semana.', 'O fim de semana está no mesmo nível dos dias úteis.')
+        : emGanho ? `Dois dias assim somam ${Math.round(custoSemanal)} kcal a mais por semana, o que empurra o superávit para cima do planejado e vira gordura, não músculo. Distribua melhor ou ajuste a meta dos dias úteis.`
         : `Dois dias assim somam ${Math.round(custoSemanal)} kcal por semana, o equivalente a ${(custoSemanal*30/7/7700).toFixed(2).replace('.',',')} kg de gordura por mês (30 dias) que deixam de sair. É quase sempre aqui que o mês trava, não na dieta de segunda a sexta.`,
       Math.round(dif));
   }
@@ -149,8 +161,9 @@ function diagnosticar(ctx) {
       pctP >= 90 ? 'ok' : pctP >= 75 ? 'atencao' : 'critico',
       'Proteína',
       `Média de ${Math.round(mediaProt)} g/dia contra alvo de ${alvo} g (${Math.round(pctP)}%). ${diasBaixos} dias abaixo de 80% do alvo.`,
-      pctP >= 90 ? 'Proteína no nível que preserva massa magra durante o déficit.'
-        : 'Em déficit, proteína baixa é o que transforma perda de peso em perda de músculo. Ancore em cada refeição: se toda refeição tiver uma fonte, o alvo sai sozinho.',
+      pctP >= 90 ? G('Proteína no nível que preserva massa magra durante o déficit.', 'Proteína no nível que sustenta o ganho de músculo.')
+        : G('Em déficit, proteína baixa é o que transforma perda de peso em perda de músculo. Ancore em cada refeição: se toda refeição tiver uma fonte, o alvo sai sozinho.',
+            'Em ganho, proteína baixa é o que faz o peso que sobe virar mais gordura e menos músculo. Ancore em cada refeição: se toda refeição tiver uma fonte, o alvo sai sozinho.'),
       Math.round(mediaProt));
   }
 
@@ -199,6 +212,46 @@ function diagnosticar(ctx) {
       Math.round(realizado));
   }
 
+  /* ── 7b. Ritmo de ganho (só em ganho de massa) ──────── */
+  if (emGanho && ctx.ritmo && typeof avaliarRitmoGanho === 'function') {
+    // ctx.ritmo = { kgSem, pct }: kgSem > 0 é ganho; pct vem em módulo (fração do peso)
+    const kgSem = ctx.ritmo.kgSem;
+    const pesoRef = ctx.pesoAtual > 0 ? ctx.pesoAtual : (ctx.ritmo.pct > 0 ? Math.abs(kgSem) / ctx.ritmo.pct : 0);
+    if (typeof kgSem === 'number' && isFinite(kgSem) && pesoRef > 0) {
+      const av = avaliarRitmoGanho(kgSem, pesoRef);
+      const ganhando = kgSem > 0;
+      add('ritmo-ganho',
+        av.nivel === 'ideal' ? 'ok' : av.nivel === 'rapido' ? 'atencao' : (diasDado >= 14 ? 'atencao' : 'neutro'),
+        'Ritmo de ganho',
+        `${kgSem.toFixed(2).replace('.',',')} kg por semana (${av.pct.toFixed(2).replace('.',',')}% do peso).`,
+        av.nivel === 'ideal' ? 'No ritmo que rende mais músculo por gordura acumulada. Não mexa em nada.'
+          : av.nivel === 'rapido' ? 'Rápido demais para um ganho limpo. Acima de 0,5% por semana, a fatia que vira gordura cresce. Reduza a meta em 100 a 200 kcal e reavalie em duas semanas.'
+          : !ganhando ? 'O peso não está subindo. Antes de mexer na meta, veja se o consumo está cumprindo o planejado; se está, suba 100 a 150 kcal e mantenha a proteína e o treino.'
+          : 'Abaixo da faixa de 0,1% a 0,5% por semana. Cruze com o consumo real antes de subir calorias: se a meta não está sendo cumprida, o problema é execução.' +
+            (diasDado < 14 ? ' Com menos de duas semanas de dado, ainda é cedo para concluir.' : ''),
+        +av.pct.toFixed(2), { nivelRitmo: av.nivel, ganhando });
+    }
+  }
+
+  /* ── 8b. Superávit planejado × realizado (só em ganho) ─ */
+  if (emGanho && comDiario.length >= 5) {
+    const comGasto = ctx.gasto && ctx.gasto.ok && comDiario.length >= 10;
+    const planejado = comGasto ? ctx.cfg.kcal - ctx.gasto.tdee : null;
+    const realizado = comGasto ? mediaKcal - ctx.gasto.tdee : null;
+    const lacuna = comGasto ? planejado - realizado : ctx.cfg.kcal - mediaKcal;   // > 0: comendo abaixo do planejado
+    const ok = Math.abs(lacuna) <= 120;
+    add('superavit-real',
+      pouco ? 'neutro' : ok ? 'ok' : 'atencao',
+      comGasto ? 'Superávit planejado × realizado' : 'Consumo médio × meta',
+      comGasto
+        ? `Planejado ${Math.round(planejado)} kcal/dia acima do gasto medido, realizado ${Math.round(realizado)} kcal/dia.`
+        : `${Math.round(mediaKcal)} kcal/dia contra meta de ${ctx.cfg.kcal}. ${lacuna <= 0 ? 'Acima' : 'Abaixo'} em ${Math.abs(Math.round(lacuna))} kcal.`,
+      ok ? 'O plano e a execução estão alinhados.'
+        : lacuna > 0 ? `Faltam ${Math.round(lacuna)} kcal por dia para chegar à meta. Sem esse superávit o ganho não acontece, e o problema é execução, não o número. Feche a meta antes de subi-la.`
+        : `Você está comendo ${Math.round(-lacuna)} kcal por dia acima da meta. O superávit real passou do planejado, e o excedente tende a virar gordura. Volte para a meta.`,
+      Math.round(mediaKcal), { lacuna: Math.round(lacuna) });
+  }
+
   /* ── 9. Massa magra ─────────────────────────────────── */
   const comBf = ctx.pesos.filter(p => p.bf).sort((a,b)=>a.d<b.d?-1:1);
   const medidas = ((ctx.cfg || {}).sexo === 'f') ? 'cintura, pescoço e quadril' : 'cintura e pescoço';
@@ -215,10 +268,11 @@ function diagnosticar(ctx) {
     add('massa-magra',
       dm >= -0.5 ? 'ok' : dm >= -1.5 ? 'neutro' : dm >= -3 ? 'atencao' : 'critico',
       'Massa magra',
-      `${dg < 0 ? '−' : '+'}${Math.abs(dg).toFixed(1).replace('.',',')} kg de gordura e ${dm < 0 ? '−' : '+'}${Math.abs(dm).toFixed(1).replace('.',',')} kg de massa magra em ${intervaloBf} dias. ${Math.round(fracGordura*100)}% do que saiu era gordura.`,
-      dm >= -0.5 ? 'Massa magra praticamente preservada — é exatamente o alvo de um déficit bem conduzido.'
+      `${dg < 0 ? '−' : '+'}${Math.abs(dg).toFixed(1).replace('.',',')} kg de gordura e ${dm < 0 ? '−' : '+'}${Math.abs(dm).toFixed(1).replace('.',',')} kg de massa magra em ${intervaloBf} dias. ${Math.round(fracGordura*100)}% ${emGanho ? 'da variação de peso foi gordura' : 'do que saiu era gordura'}.`,
+      dm >= -0.5 ? G('Massa magra praticamente preservada — é exatamente o alvo de um déficit bem conduzido.', 'Massa magra preservada ou subindo, que é o alvo de um ganho bem conduzido.')
         : dm >= -1.5 ? 'A diferença está dentro da margem de erro da fita métrica (3–4 pontos de gordura). Não é motivo de alarme: repita a medida nas próximas semanas e olhe a tendência.'
-        : 'Perda de massa magra relevante, acima da margem de erro da medida. As três alavancas, nessa ordem: subir proteína, não cortar mais caloria, e não faltar treino.',
+        : G('Perda de massa magra relevante, acima da margem de erro da medida. As três alavancas, nessa ordem: subir proteína, não cortar mais caloria, e não faltar treino.',
+            'Massa magra caindo mesmo com superávit, acima da margem de erro da medida. Confira, nessa ordem: proteína no alvo, treino de força com carga progressiva e sono.'),
       Math.round(fracGordura*100));
   } else if (comBf.length >= 2) {
     add('massa-magra', 'neutro', 'Massa magra',
@@ -235,9 +289,13 @@ function diagnosticar(ctx) {
   if (comCint.length >= 2) {
     const dC = comCint[comCint.length-1].cintura - comCint[0].cintura;
     const pesoMudou = ctx.pesos.length >= 2;
-    add('cintura', dC <= -1 ? 'ok' : dC <= 0.5 ? 'neutro' : 'atencao', 'Cintura',
+    add('cintura', emGanho ? (dC <= 1 ? 'ok' : dC <= 2.5 ? 'neutro' : 'atencao') : (dC <= -1 ? 'ok' : dC <= 0.5 ? 'neutro' : 'atencao'), 'Cintura',
       `${dC <= 0 ? '−' : '+'}${Math.abs(dC).toFixed(1).replace('.',',')} cm no período, agora em ${comCint[comCint.length-1].cintura} cm.`,
-      dC <= -1 ? 'Cintura caindo é o melhor sinal de perda de gordura visceral, e costuma continuar caindo mesmo em semanas que a balança empaca.'
+      emGanho
+        ? (dC <= 1 ? 'Cintura estável ou subindo pouco enquanto o peso sobe é o sinal de que o ganho está vindo mais de músculo que de gordura.'
+          : dC <= 2.5 ? 'Cintura subindo um pouco. Esperado em ganho, mas acompanhe: se continuar subindo mais rápido que o peso, o superávit está alto.'
+          : 'Cintura subindo bem mais que o esperado. Costuma indicar excesso de gordura no ganho: reduza o superávit em 100 a 200 kcal e reavalie.')
+        : dC <= -1 ? 'Cintura caindo é o melhor sinal de perda de gordura visceral, e costuma continuar caindo mesmo em semanas que a balança empaca.'
         : 'Cintura parada junto com peso parado confirma que o déficit não está acontecendo. Cintura parada com peso caindo é sinal de perda de água ou de massa magra.',
       +dC.toFixed(1));
   }
@@ -253,7 +311,8 @@ function diagnosticar(ctx) {
     `${sessForca.length} ${sessForca.length === 1 ? 'sessão' : 'sessões'} de força em ${janelaEf} ${janelaEf === 1 ? 'dia' : 'dias'}${pouco ? '.' : ' — ' + porSemana.toFixed(1).replace('.',',') + ' por semana.'}`,
     pouco ? ROT_POUCO
       : porSemana >= 2.5 ? 'Frequência suficiente para o estímulo que preserva massa magra.'
-      : 'Em déficit, o treino de força não é o que queima caloria — é o que diz ao corpo para não gastar músculo. Faltar treino muda a composição do que você perde.',
+      : G('Em déficit, o treino de força não é o que queima caloria — é o que diz ao corpo para não gastar músculo. Faltar treino muda a composição do que você perde.',
+          'Em ganho, o treino de força é o estímulo que decide se o superávit vira músculo ou gordura. Com poucas sessões, o que sobra de caloria tende a virar gordura.'),
     sessForca.length);
 
   /* ── 12. Progressão de carga ────────────────────────── */
@@ -278,8 +337,9 @@ function diagnosticar(ctx) {
       pctSub >= 60 ? 'ok' : pctSub >= 30 ? 'atencao' : 'critico',
       'Progressão de carga',
       `${subiram.length} de ${nomes.length} exercícios com carga maior que no início. ${estagnados.length ? estagnados.length + ' parados há 3 sessões: ' + estagnados.slice(0,3).join(', ') + '.' : ''}`,
-      pctSub >= 60 ? 'Ganhando força em déficit é o melhor indicador de que o músculo está sendo preservado.'
-        : 'Carga parada em déficit não é necessariamente erro, mas se vem junto com perda de massa magra, é sinal de que falta proteína, recuperação ou estímulo.',
+      pctSub >= 60 ? G('Ganhando força em déficit é o melhor indicador de que o músculo está sendo preservado.', 'Carga subindo é o melhor indicador de que o superávit está virando músculo.')
+        : G('Carga parada em déficit não é necessariamente erro, mas se vem junto com perda de massa magra, é sinal de que falta proteína, recuperação ou estímulo.',
+            'Carga parada em ganho é sinal de que falta progressão, recuperação ou calorias. Com superávit e treino, a carga deveria subir: revise a execução antes de aumentar a meta.'),
       Math.round(pctSub));
   }
 
@@ -297,7 +357,8 @@ function diagnosticar(ctx) {
       `RIR médio de ${m.toFixed(1).replace('.',',')} contra alvo de ${alvo} na fase ${ctx.faseAtual.nome}. ${rirs.length} séries com esforço anotado.`,
       Math.abs(dif) <= 1 ? 'Intensidade calibrada com a fase.'
         : dif > 1 ? 'Você está parando longe demais da falha. Sobra estímulo na mesa e a carga não tem por que subir.'
-        : 'Você está indo perto demais da falha para esta fase. Em déficit isso atrapalha a recuperação sem entregar estímulo extra.',
+        : G('Você está indo perto demais da falha para esta fase. Em déficit isso atrapalha a recuperação sem entregar estímulo extra.',
+            'Você está indo perto demais da falha para esta fase. Isso atrapalha a recuperação sem entregar estímulo extra.'),
       +m.toFixed(1));
   } else if (sess28.length >= 3) {
     add('rir', 'neutro', 'Esforço nas séries',
@@ -339,7 +400,7 @@ function diagnosticar(ctx) {
     const tend = volSem[3] - volSem[0];
     add('volume', tend >= 0 ? 'ok' : 'neutro', 'Volume de treino',
       `Última semana: ${Math.round(volSem[3]/1000*10)/10} t. Quatro semanas atrás: ${Math.round(volSem[0]/1000*10)/10} t.`,
-      tend >= 0 ? 'Volume estável ou subindo em déficit é um bom sinal de recuperação adequada.'
+      tend >= 0 ? G('Volume estável ou subindo em déficit é um bom sinal de recuperação adequada.', 'Volume estável ou subindo é o que se espera em ganho e um bom sinal de recuperação.')
         : 'Volume caindo pode ser fase de deload (normal) ou fadiga acumulada (não normal). Cruze com a fase atual do ciclo.',
       Math.round(volSem[3]));
   }
@@ -378,8 +439,9 @@ function diagnosticar(ctx) {
     const pct = (m / ctx.cfg.passosMeta) * 100;
     add('passos', pct >= 85 ? 'ok' : 'atencao', 'Passos',
       `${Math.round(m).toLocaleString('pt-BR')} passos/dia em ${passos.length} dias registrados (${Math.round(pct)}% da meta).`,
-      pct >= 85 ? 'Gasto de atividade não-exercício em bom nível — é ele que sustenta o déficit sem cortar mais comida.'
-        : `Faltam ${Math.round(ctx.cfg.passosMeta - m).toLocaleString('pt-BR')} passos por dia. Subir isso é o caminho mais barato de aumentar déficit sem tirar comida do prato.`,
+      pct >= 85 ? G('Gasto de atividade não-exercício em bom nível — é ele que sustenta o déficit sem cortar mais comida.', 'Atividade do dia a dia em bom nível, o que ajuda a manter a saúde cardiovascular e o apetite regular durante o ganho.')
+        : G(`Faltam ${Math.round(ctx.cfg.passosMeta - m).toLocaleString('pt-BR')} passos por dia. Subir isso é o caminho mais barato de aumentar déficit sem tirar comida do prato.`,
+            `Faltam ${Math.round(ctx.cfg.passosMeta - m).toLocaleString('pt-BR')} passos por dia. Em ganho, andar mais ajuda a saúde cardiovascular e o apetite, sem comprometer o superávit se você ajustar a meta.`),
       Math.round(m));
   }
 
@@ -422,7 +484,8 @@ function diagnosticar(ctx) {
       orf.length >= 3 ? 'critico' : (orf.length || baixos.length) ? 'atencao' : 'ok',
       'Séries por músculo',
       `${total} séries válidas em 7 dias. ${orf.length ? 'Sem estímulo direto: ' + orf.join(', ') + '.' : 'Todos os grupos receberam estímulo.'}${baixos.length ? ' Abaixo da faixa: ' + baixos.join(', ') + '.' : ''}`,
-      orf.length ? 'Séries semanais por músculo é o principal motor de hipertrofia. Grupo sem estímulo em déficit é o primeiro a ser consumido — uma ou duas séries já resolvem.'
+      orf.length ? G('Séries semanais por músculo é o principal motor de hipertrofia. Grupo sem estímulo em déficit é o primeiro a ser consumido — uma ou duas séries já resolvem.',
+                     'Séries semanais por músculo é o principal motor de hipertrofia. Grupo sem estímulo não cresce, mesmo com superávit — uma ou duas séries já resolvem.')
         : 'Distribuição adequada entre os grupos.',
       total);
   }
@@ -447,14 +510,16 @@ function diagnosticar(ctx) {
       add('fibra', poucoDado ? 'neutro' : fibMedia >= REF_MICRO.fibra*0.8 ? 'ok' : 'atencao', 'Fibra',
         `${fibMedia.toFixed(0)} g/dia em média, contra referência de ${REF_MICRO.fibra} g. Dado disponível para ${Math.round(cob*100)}% dos itens registrados.`,
         poucoDado ? AVISO_COB
-          : fibMedia >= REF_MICRO.fibra*0.8 ? 'Fibra adequada, o que ajuda muito a saciedade dentro do déficit.'
-          : 'Fibra baixa é uma das causas mais subestimadas de fome em déficit. Feijão, aveia, brócolis e frutas com casca resolvem sem custar quase caloria nenhuma.',
+          : fibMedia >= REF_MICRO.fibra*0.8 ? G('Fibra adequada, o que ajuda muito a saciedade dentro do déficit.', 'Fibra adequada, o que ajuda a digestão e a regularidade do apetite.')
+          : G('Fibra baixa é uma das causas mais subestimadas de fome em déficit. Feijão, aveia, brócolis e frutas com casca resolvem sem custar quase caloria nenhuma.',
+              'Fibra baixa é comum em quem come muito para ganhar peso e atrapalha a digestão. Feijão, aveia, brócolis e frutas com casca resolvem.'),
         Math.round(fibMedia));
       add('sodio', poucoDado ? 'neutro' : sodMedio <= REF_MICRO.sodioMax ? 'ok' : 'atencao', 'Sódio',
         `${Math.round(sodMedio)} mg/dia em média, contra limite de referência de ${REF_MICRO.sodioMax} mg.`,
         poucoDado ? AVISO_COB
           : sodMedio <= REF_MICRO.sodioMax ? 'Dentro da faixa.'
-          : 'Sódio alto retém água e trava a balança por dias, mesmo com gordura saindo. Se o peso empacou sem explicação, olhe aqui antes de cortar caloria.',
+          : G('Sódio alto retém água e trava a balança por dias, mesmo com gordura saindo. Se o peso empacou sem explicação, olhe aqui antes de cortar caloria.',
+              'Sódio alto retém água e faz a balança subir por dias sem que seja músculo nem gordura. Antes de ler uma subida brusca como ganho, olhe aqui.'),
         Math.round(sodMedio));
     }
   }
@@ -474,6 +539,11 @@ function diagnosticar(ctx) {
       add('transicao', 'atencao', 'Meta atingida',
         `Sua tendência chegou em ${String(ctx.tendencia.toFixed(1)).replace('.',',')} kg.`,
         'Continuar em déficit depois de chegar é como se perde massa magra e como se cansa da rotina. Passe para manutenção na aba Progresso.',
+        +ctx.tendencia.toFixed(1));
+    } else if (f === 'ganho' && ctx.tendencia != null && ctx.cfg.pesoMeta > 0 && ctx.tendencia >= ctx.cfg.pesoMeta * 0.99) {
+      add('transicao', 'atencao', 'Meta de ganho atingida',
+        `Sua tendência chegou em ${String(ctx.tendencia.toFixed(1)).replace('.',',')} kg.`,
+        'Continuar em superávit depois de chegar acumula gordura sem render mais músculo. Passe para manutenção na aba Progresso e ajuste as calorias ao seu novo gasto.',
         +ctx.tendencia.toFixed(1));
     }
   }
@@ -495,10 +565,14 @@ function diagnosticar(ctx) {
    Cada uma monta a resposta a partir dos achados, na ordem
    de causa provável. Sem IA e sem internet.            */
 
+/* `fases` (opcional): fases do plano em que a pergunta faz sentido. Sem o campo, vale em todas.
+   Quem monta a lista filtra com perguntaDaFase(p, fasePlano) e mantém o índice original. */
 const PERGUNTAS = [
-  { q: 'Por que não estou emagrecendo?',
+  { q: 'Por que não estou emagrecendo?', fases: ['perda', 'recuperacao', 'manutencao'],
     usa: ['ritmo','deficit-real','aderencia-kcal','cobertura','fim-de-semana','alcool','passos'],
     intro: a => {
+      if (a.find(x => x.id === 'fase-ganho'))
+        return 'Você está na fase de ganho de massa: o plano tem superávit, não déficit. Para saber se o ganho está no ritmo certo, use a pergunta sobre o ritmo de ganho.';
       if (a.find(x => x.id === 'sem-deficit'))
         return 'Você está na fase de manutenção: não há déficit planejado, então peso estável é o esperado. Se quer voltar a perder, mude a fase em Progresso.';
       const r = a.find(x => x.id === 'ritmo');
@@ -510,13 +584,38 @@ const PERGUNTAS = [
       return 'A causa quase nunca é metabólica. Na ordem de probabilidade:';
     } },
 
+  { q: 'Estou ganhando no ritmo certo?', fases: ['ganho'],
+    usa: ['ritmo-ganho','superavit-real','cobertura','proteina','frequencia'],
+    intro: a => {
+      const r = a.find(x => x.id === 'ritmo-ganho');
+      if (!r) return 'Faltam pesagens para responder isso com número. Registre o peso semanalmente por 3 semanas.';
+      if (r.nivelRitmo === 'ideal') return 'Você **está** no ritmo certo. Veja abaixo o que sustenta isso:';
+      if (r.nivelRitmo === 'rapido') return 'Você está ganhando **rápido demais**: boa parte tende a ser gordura. Veja abaixo:';
+      if (r.ganhando) return 'Você está ganhando, só que **abaixo do ritmo** planejado. Na ordem de probabilidade:';
+      return 'O peso **não está subindo**. A causa quase nunca é metabólica. Na ordem de probabilidade:';
+    } },
+
+  { q: 'Devo aumentar as calorias?', fases: ['ganho'],
+    usa: ['ritmo-ganho','superavit-real','cobertura','gasto'],
+    intro: a => {
+      const cob = a.find(x => x.id === 'cobertura');
+      const su = a.find(x => x.id === 'superavit-real');
+      const r = a.find(x => x.id === 'ritmo-ganho');
+      if (cob && cob.n < 70) return '**Não ainda.** Com registro incompleto você não sabe quanto come hoje: subir uma meta que você não conhece é chutar.';
+      if (su && su.lacuna > 120) return '**Provavelmente não.** A meta atual ainda não está sendo cumprida. Feche a execução antes de subir o número.';
+      if (r && r.nivelRitmo === 'rapido') return '**Não.** O ritmo já está acima do ideal: se mexer, é para reduzir.';
+      return 'Depende do que os números abaixo mostram:';
+    } },
+
   { q: 'Estou perdendo músculo?',
-    usa: ['massa-magra','proteina','frequencia','progressao','ritmo'],
+    usa: ['massa-magra','proteina','frequencia','progressao','ritmo','ritmo-ganho'],
     intro: () => 'Quatro sinais respondem isso melhor que a balança:' },
 
-  { q: 'Devo cortar calorias agora?',
+  { q: 'Devo cortar calorias agora?', fases: ['perda', 'recuperacao', 'manutencao'],
     usa: ['ritmo','aderencia-kcal','cobertura','deficit-real','gasto'],
     intro: a => {
+      if (a.find(x => x.id === 'fase-ganho'))
+        return '**Não.** Você está na fase de ganho de massa, com superávit planejado. Se o ritmo ficar acima do ideal, o ajuste é reduzir um pouco; veja a pergunta sobre aumentar as calorias.';
       const ad = a.find(x => x.id === 'aderencia-kcal');
       const cob = a.find(x => x.id === 'cobertura');
       if (cob && cob.n < 70) return '**Não.** Com registro incompleto você não sabe quanto come hoje — cortar um número que você não conhece é chutar para baixo.';
@@ -536,6 +635,11 @@ const PERGUNTAS = [
     usa: null,
     intro: () => 'Os três pontos mais críticos agora:' }
 ];
+
+/* A pergunta vale na fase informada? Sem `fases`, vale em todas; sem fase, vale a de perda. */
+function perguntaDaFase(p, fasePlano) {
+  return !p.fases || p.fases.indexOf(fasePlano || 'perda') >= 0;
+}
 
 function responder(pergunta, achados) {
   const sel = pergunta.usa

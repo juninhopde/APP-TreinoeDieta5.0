@@ -6,13 +6,15 @@
    chegar. Obesidade é condição crônica, e tratamento que
    termina em doze semanas não é tratamento, é temporada.
 
-   Três estados:
+   Quatro estados (o quarto, GANHO, é superávit controlado e não usa faixa de manutenção):
 
    PERDA         déficit ativo, o que já existia
    MANUTENÇÃO    meta igual ao gasto medido, faixa em vez de
                  número, registro mais leve, pesagem mantida
    RECUPERAÇÃO   acionado por reganho confirmado, déficit leve
                  com reavaliação antes
+   GANHO         superávit pequeno (teto de 15% do gasto e 500 kcal),
+                 proteína alta e treino de força
 
    Nada aqui usa a balança do dia. Toda decisão sai da
    tendência, porque agir sobre ruído é como a pessoa acaba
@@ -34,8 +36,29 @@ const FASES_PLANO = {
     rot: 'Recuperação', cor: 'carb',
     desc: 'Reganho confirmado. Déficit leve, registro apertado de novo, por tempo definido.',
     coberturaMin: 0.70, pesagemMax: 7
+  },
+  ganho: {
+    rot: 'Ganho de massa', cor: 'prot',
+    desc: 'Superávit pequeno e controlado, proteína alta e treino de força. O alvo é ganhar músculo com o mínimo de gordura.',
+    coberturaMin: 0.60, pesagemMax: 9
   }
 };
+
+/* Ritmo de ganho avaliado em % do peso por semana: de 0,1% a 0,5% é a faixa útil.
+   Acima disso, boa parte do que sobe tende a ser gordura; abaixo, não há estímulo de superávit.
+   `kgPorSemana` > 0 é ganho. `pct` sai SINALIZADO (negativo = perdendo). */
+function avaliarRitmoGanho(kgPorSemana, pesoKg) {
+  if (!(typeof kgPorSemana === 'number' && isFinite(kgPorSemana)) || !(pesoKg > 0)) return { nivel: 'lento', pct: 0, txt: 'Sem dados para avaliar o ritmo.' };
+  const pct = +(kgPorSemana / pesoKg * 100).toFixed(2);
+  const f = pct.toFixed(2).replace('.', ',');
+  if (pct > 0.5) return { nivel: 'rapido', pct,
+    txt: 'Ritmo de ' + f + '% do peso por semana, acima de 0,5%. Nessa velocidade boa parte do ganho tende a ser gordura, não músculo. Reduza um pouco as calorias.' };
+  if (pct < 0.1) return { nivel: 'lento', pct,
+    txt: pct <= 0
+      ? 'O peso não está subindo (' + f + '% por semana). Confira se o registro está completo e, mantendo a proteína e o treino, suba as calorias aos poucos.'
+      : 'Ritmo de ' + f + '% do peso por semana, abaixo de 0,1%. É lento demais para o superávit fazer efeito: considere subir um pouco as calorias.' };
+  return { nivel: 'ideal', pct, txt: 'Ritmo de ' + f + '% do peso por semana, dentro da faixa de 0,1% a 0,5%. É o que rende mais músculo por gordura acumulada.' };
+}
 
 const FAIXA_PCT = 0.02;      // ±2% em torno do peso de manutenção
 const ALERTA_AMARELO_SEM = 2; // semanas acima do topo da faixa
@@ -127,7 +150,8 @@ function regraDisparada(regra, tendAtual) {
 
 /* Meta calórica por fase. Em manutenção o déficit é zero por
    definição: a meta é o gasto medido. */
-function metaPorFase(fase, tdee, pesoKg, ritmoPct, pisoKcal, reganho, alturaCm) {
+function metaPorFase(fase, tdee, pesoKg, ritmoPct, pisoKcal, reganho, alturaCm, nivel) {
+  if (fase === 'ganho') return metaPorGanho(tdee, pesoKg, nivel, pisoKcal, alturaCm);
   if (fase === 'manutencao') {
     // O piso vale em TODAS as fases. Um gasto medido implausivelmente
     // baixo (registro incompleto, peso errado) não pode virar meta.
@@ -152,6 +176,17 @@ function metaPorFase(fase, tdee, pesoKg, ritmoPct, pisoKcal, reganho, alturaCm) 
 /* Sugere a transição quando o alvo é atingido. Só sugere:
    quem decide é a pessoa. */
 function transicaoSugerida(fase, pesoTend, pesoMeta, bf, sexo) {
+  if (fase === 'ganho') {
+    if (pesoTend == null || !(pesoMeta > 0) || pesoTend < pesoMeta * 0.99) return null;
+    return {
+      para: 'manutencao',
+      txt: `Sua tendência chegou em ${pesoTend.toFixed(1).replace('.',',')} kg, na meta de ganho que você definiu.
+
+**Hora de consolidar.** Ficar em superávit depois de chegar acumula gordura sem render mais músculo. Passar para manutenção significa: meta de calorias ajustada ao seu novo gasto (que subiu com o peso), proteína e treino de força mantidos, e faixa de ±2% em vez de um número.
+
+Se depois de um período estável você quiser outra fase de ganho, é só voltar para ela.`
+    };
+  }
   if (fase !== 'perda' || pesoTend == null) return null;
   if (pesoTend > pesoMeta * 1.01) return null;
   return {

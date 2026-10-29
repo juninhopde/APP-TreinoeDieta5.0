@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Controle — Dieta, Treino e Coach</title>
-<meta name="app-versao" content="5.2.1">
+<meta name="app-versao" content="5.5.0">
 <meta name="description" content="Controle: dieta, treino e coach com plano montado para o seu perfil. Funciona offline e guarda os dados só no seu aparelho.">
 
 <link rel="manifest" href="manifest.webmanifest">
@@ -53,8 +53,10 @@
         <div class="anel-kcal" id="kcal-rest">—</div>
         <div class="anel-rot">kcal restantes</div>
         <div class="anel-sub" id="kcal-sub">—</div>
+        <div class="anel-bal" id="kcal-bal" hidden></div>
       </div>
     </div>
+    <div id="pilares" class="pilares"></div>
     <div id="barras"></div>
   </header>
 
@@ -152,7 +154,10 @@
 <script src="js/ia-local.js"></script>
 <script src="js/foto-prato.js"></script>
 <script src="js/habitos.js"></script>
+<script src="js/pilares.js"></script>
+<script src="js/trocas.js"></script>
 <script src="js/backup.js"></script>
+<script src="js/treino-pdf.js"></script>
 <script src="js/onboarding.js"></script>
 <script src="js/app.js"></script>
 

@@ -139,3 +139,17 @@ function comprimirImagem(arquivo, lado, qualidade) {
     img.src = url;
   });
 }
+
+/* Compara duas fotos de progresso. A mais antiga vira "antes", seja qual for a ordem em que
+   a pessoa as escolheu. Devolve { antes, depois, dias, kg } ou { erro }. `kg` só existe se as
+   duas fotos têm peso gravado. */
+function compararFotos(a, b) {
+  if (!a || !b) return { erro: 'Escolha duas fotos.' };
+  if (a.id === b.id) return { erro: 'Escolha duas fotos diferentes.' };
+  const [antes, depois] = String(a.data) <= String(b.data) ? [a, b] : [b, a];
+  const d0 = new Date(antes.data + 'T12:00'), d1 = new Date(depois.data + 'T12:00');
+  const dias = Math.round((d1 - d0) / 86400000);
+  const p0 = +antes.peso, p1 = +depois.peso;
+  const kg = p0 > 0 && p1 > 0 ? +(p1 - p0).toFixed(1) : null;
+  return { antes, depois, dias: isNaN(dias) ? null : dias, kg };
+}

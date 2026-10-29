@@ -32,6 +32,15 @@ const PESO_VALIDO = { min: 40, max: 350 };      // kg — UMA faixa para onboard
 const ALTURA_VALIDA = { min: 120, max: 230 };   // cm
 const CARB_MIN = 60;                            // g: carboidrato mínimo do plano, enquanto as calorias deixarem
 
+/* Ganho de massa (superávit controlado). Mesma regra de "uma fonte só" dos limites acima.
+   CONVENÇÃO DE SINAL, em todo o app: deficit, ritmoPct e ritmoReal são positivos quando o
+   balanço é de PERDA e NEGATIVOS quando é de GANHO. `superavit` é sempre positivo. */
+const TETO_SUPERAVIT = 0.15;                    // o superávit nunca passa de 15% do gasto
+const TETO_SUPERAVIT_KCAL = 500;                // nem de 500 kcal/dia
+const IMC_MAX_GANHO = 27;                       // IMC a partir daqui: sem superávit, plano de recomposição em manutenção
+const IMC_AVISO_BAIXO = 17;                     // IMC abaixo disso pode ganhar, mas com acompanhamento profissional
+const RITMO_GANHO = { iniciante: 0.004, intermediario: 0.0025 };   // fração do peso por semana
+
 const arred10 = n => Math.round(n / 10) * 10;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -73,6 +82,20 @@ function perdaPermitida(kg, cm) {
   return { ok: true, imc: +imc.toFixed(1) };
 }
 
+/* A pessoa pode entrar (ou continuar) em superávit? Com IMC a partir de 27 não:
+   o ganho viria em boa parte como gordura, e o caminho indicado é manutenção com
+   treino de força e proteína alta (recomposição). IMC baixo PODE ganhar; abaixo de 17
+   o texto manda acompanhar com profissional. Na dúvida (NaN), sem superávit. */
+function ganhoPermitido(kg, cm) {
+  const imc = imcDe(kg, cm);
+  if (!(imc < IMC_MAX_GANHO))
+    return { ok: false, motivo: 'imc_alto', imc: isNaN(imc) ? null : +imc.toFixed(1),
+      texto: 'Com IMC acima de ' + IMC_MAX_GANHO + (isNaN(imc) ? '' : ' (o seu é ' + String(imc.toFixed(1)).replace('.', ',') + ')') +
+             ', ganhar massa em superávit não é indicado; o plano segue em manutenção, com treino de força e proteína alta — recomposição.' };
+  return { ok: true, imc: +imc.toFixed(1),
+    texto: imc < IMC_AVISO_BAIXO ? 'Seu IMC (' + String(imc.toFixed(1)).replace('.', ',') + ') está abaixo de ' + IMC_AVISO_BAIXO + '. Ganhar peso nessa faixa deve ser acompanhado por médico ou nutricionista.' : '' };
+}
+
 /* Peso em que o IMC fica em `imc`, arredondado PARA CIMA em 0,1 kg
    (arredondar para baixo deixaria a meta um tico abaixo do limite). */
 const pesoDeImc = (imc, cm) => Math.ceil(imc * Math.pow(cm / 100, 2) * 10) / 10;
@@ -86,7 +109,7 @@ function planoNutricao(p) {
   const avisos = [];
   const imc = imcDe(p.kg, p.cm);
   let objetivo = p.objetivo || 'emagrecer';
-  let forcado = null;                              // por que o pedido de emagrecer virou manutenção
+  let forcado = null;                              // por que o pedido de emagrecer/ganhar virou manutenção
 
   const tmb = tmbMifflin(p.sexo, p.kg, p.cm, p.idade);
   const dias = p.dias || 3;
@@ -107,10 +130,24 @@ function planoNutricao(p) {
                   ' kcal) ou a menos de ' + DEFICIT_MIN_UTIL + ' kcal dele. Não há espaço seguro para déficit, então o plano foi ajustado para manutenção. Vale conversar com um profissional.');
     }
   }
-  if (p.idade >= 65) avisos.push('Acima de 65 anos, proteína e treino de força importam ainda mais, mas vale avaliar com o médico antes de cortar calorias.');
+  if (objetivo === 'ganhar') {
+    const gp = ganhoPermitido(p.kg, p.cm);
+    if (!gp.ok) {
+      objetivo = 'manter'; forcado = 'imc_alto';
+      avisos.push(gp.texto);
+    } else if (tdee * (1 + TETO_SUPERAVIT) < piso) {
+      // Gasto tão baixo que o piso de segurança já passaria do teto de superávit.
+      objetivo = 'manter'; forcado = 'piso';
+      avisos.push('Seu gasto estimado (' + Math.round(tdee) + ' kcal por dia) é tão baixo que o piso de segurança do app (' + piso +
+                  ' kcal) já passaria do teto de superávit. O plano foi ajustado para manutenção. Vale conversar com um profissional.');
+    } else if (gp.texto) avisos.push(gp.texto);
+  }
+  if (p.idade >= 65) avisos.push(objetivo === 'ganhar'
+    ? 'Acima de 65 anos, proteína e treino de força importam ainda mais, mas vale avaliar com o médico antes de aumentar calorias.'
+    : 'Acima de 65 anos, proteína e treino de força importam ainda mais, mas vale avaliar com o médico antes de cortar calorias.');
 
   // O piso vale em TODOS os objetivos: manutenção também não desce dele.
-  let kcal = Math.max(piso, arred10(tdee)), ritmo = 0, deficit = 0, limitado = false, ritmoPretendido = 0.005;
+  let kcal = Math.max(piso, arred10(tdee)), ritmo = 0, deficit = 0, limitado = false, ritmoPretendido = 0.005, superavit = 0;
   if (objetivo !== 'emagrecer' && !forcado && tdee < piso)
     avisos.push('Seu gasto estimado (' + Math.round(tdee) + ' kcal por dia) está abaixo do piso de segurança do app. A meta fica no piso (' + piso + ' kcal).');
   if (objetivo === 'emagrecer') {
@@ -125,18 +162,36 @@ function planoNutricao(p) {
     ritmo = +(((tdee - kcal) * 7) / (KCAL_KG * p.kg)).toFixed(4);
     deficit = Math.round(tdee - kcal);
   }
+  if (objetivo === 'ganhar') {
+    // Lean bulk: ritmo por nível, limitado a 15% do gasto e a 500 kcal/dia. O arredondamento
+    // para 10 kcal nunca pode empurrar o superávit para cima do teto.
+    ritmoPretendido = RITMO_GANHO[p.nivel === 'intermediario' ? 'intermediario' : 'iniciante'];
+    const bruto = ritmoPretendido * p.kg * KCAL_KG / 7;
+    const teto = Math.min(tdee * TETO_SUPERAVIT, TETO_SUPERAVIT_KCAL);
+    const sup = Math.min(bruto, teto);
+    let k = arred10(tdee + sup);
+    if (k - tdee > sup + 1e-9) k -= 10;
+    kcal = Math.max(piso, k);
+    limitado = bruto > teto;
+    if (limitado) avisos.push('O superávit foi limitado para não passar de ' + Math.round(TETO_SUPERAVIT * 100) + '% do gasto nem de ' + TETO_SUPERAVIT_KCAL + ' kcal por dia.');
+    superavit = Math.floor(kcal - tdee + 1e-9);      // nunca acima do teto
+    deficit = -superavit;
+    ritmo = +(((tdee - kcal) * 7) / (KCAL_KG * p.kg)).toFixed(4);   // negativo: ganho
+  }
 
   const ideal = 25 * Math.pow(p.cm / 100, 2);
   const ajust = p.kg > ideal ? ideal + 0.25 * (p.kg - ideal) : p.kg;
-  const gProt = objetivo === 'emagrecer' ? 1.9 : 1.7;
-  const prot = Math.round(gProt * ajust);
-  let gord = Math.round(0.8 * ajust);
+  // Em ganho, g/kg sobre o peso real (IMC < 27 por construção); só acima de IMC 30 usaria o ajustado.
+  const base = objetivo === 'ganhar' ? (imc > 30 ? ajust : p.kg) : ajust;
+  const gProt = objetivo === 'emagrecer' ? 1.9 : objetivo === 'ganhar' ? 1.8 : forcado === 'imc_alto' ? 1.8 : 1.7;
+  const prot = Math.round(gProt * base);
+  let gord = Math.round((objetivo === 'ganhar' ? 0.9 : 0.8) * base);
   let carb = Math.round((kcal - prot * 4 - gord * 9) / 4);
   if (carb < CARB_MIN) {
     // Sem folga para o carboidrato mínimo. Forçá-lo faria os macros somarem mais
     // que a meta; tira gordura (até o mínimo essencial), nunca proteína, para a
     // soma continuar batendo com as calorias.
-    const gMin = Math.round(0.5 * ajust);
+    const gMin = Math.round(0.5 * base);
     gord = clamp(Math.floor((kcal - prot * 4 - CARB_MIN * 4) / 9), gMin, gord);
     carb = Math.max(0, Math.round((kcal - prot * 4 - gord * 9) / 4));
   }
@@ -146,9 +201,11 @@ function planoNutricao(p) {
     ok: true, objetivo, imc: +imc.toFixed(1), tmb: Math.round(tmb), fator: fat,
     tdee: Math.round(tdee), kcal, prot, carb, gord, agua,
     fibra: Math.round(14 * kcal / 1000),
-    deficit, ritmoPct: ritmo, ritmoAlvo: ritmoPretendido, limitado, forcado, pesoAjust: Math.round(ajust), avisos,
-    // 5% do peso, mas nunca abaixo do peso de IMC 18,5
-    metaInicial: objetivo === 'emagrecer' ? +Math.max(p.kg * (1 - 0.05), pesoDeImc(IMC_META_MIN, p.cm)).toFixed(1) : p.kg
+    deficit, superavit, ritmoPct: ritmo, ritmoAlvo: ritmoPretendido, limitado, forcado, pesoAjust: Math.round(ajust), avisos,
+    // perda: 5% do peso, mas nunca abaixo do peso de IMC 18,5 · ganho: +4% do peso
+    // em ganho a meta (+4%) nunca passa do peso em que o IMC chega ao limite que o próprio app bloqueia (IMC 27)
+    metaInicial: objetivo === 'ganhar' ? +Math.min(p.kg * 1.04, Math.max(p.kg, pesoDeImc(IMC_MAX_GANHO - 0.1, p.cm))).toFixed(1) : objetivo === 'emagrecer' ? +Math.max(p.kg * (1 - 0.05), pesoDeImc(IMC_META_MIN, p.cm)).toFixed(1)
+               : p.kg
   };
 }
 
@@ -463,10 +520,14 @@ function gerarPerfil(p) {
   const cfg = {
     nome: String(p.nome).trim(), sexo: p.sexo, idade: p.idade, altura: p.cm,
     pesoInicial: p.kg, pesoMeta: nutri.metaInicial,
-    atividade: nutri.fator, deficit: nutri.deficit, ritmoAlvo: nutri.ritmoAlvo,
+    // deficit é NEGATIVO em ganho (= −superavit). Em ganho, ritmoAlvo vai nulo de propósito: no
+    // app ele é a preferência de ritmo de PERDA (RITMOS); o ritmo de ganho vai em ritmoGanho.
+    atividade: nutri.fator, deficit: nutri.deficit, superavit: nutri.superavit,
+    ritmoAlvo: nutri.objetivo === 'ganhar' ? null : nutri.ritmoAlvo,
+    ritmoGanho: nutri.objetivo === 'ganhar' ? nutri.ritmoAlvo : null,
     kcal: nutri.kcal, prot: nutri.prot, carb: nutri.carb, gord: nutri.gord,
     aguaMeta: nutri.agua, diasTreino: plano.diasSemana,
-    fasePlano: nutri.objetivo === 'emagrecer' ? 'perda' : 'manutencao',
+    fasePlano: nutri.objetivo === 'emagrecer' ? 'perda' : nutri.objetivo === 'ganhar' ? 'ganho' : 'manutencao',
     splitId: plano.split, nivel: p.nivel || 'iniciante', objetivo: nutri.objetivo,
     perfilFeito: true
   };
@@ -474,8 +535,9 @@ function gerarPerfil(p) {
 }
 
 return { PISO, TETO_DEFICIT, DEFICIT_MIN_UTIL, IMC_MIN_PERDA, IMC_META_MIN, PESO_VALIDO, ALTURA_VALIDA,
+         TETO_SUPERAVIT, TETO_SUPERAVIT_KCAL, IMC_MAX_GANHO, RITMO_GANHO,
          LM, MUSCULO, MUSCULOS_ROT, SPLITS, CARDIO, DIAS_SEMANA,
-         imcDe, pesoDeImc, perdaPermitida, tmbMifflin, fatorAtividade, validarPerfil, planoNutricao,
+         imcDe, pesoDeImc, perdaPermitida, ganhoPermitido, tmbMifflin, fatorAtividade, validarPerfil, planoNutricao,
          faixaDe, zonaDe, volumeSemanal, avaliarEscolha, recomendarSplit,
          montarPlano, decidirSeries, gastoMisto, gerarPerfil };
 })();

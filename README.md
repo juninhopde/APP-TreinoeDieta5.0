@@ -7,6 +7,27 @@ Os dados ficam no aparelho.
 
 ---
 
+## Versão 5.5.0 — onda 3: treino em PDF e comparação de fotos (em teste)
+
+- **Treino em PDF e compartilhar:** em cada aba do Treino, "Salvar em PDF" (impressão do navegador, "Salvar como PDF") e "Compartilhar" (menu do celular; sem suporte, copia o texto). A folha traz séries, repetições e carga sugerida da fase atual.
+- **Comparar fotos:** em Progresso, "Comparar duas fotos" mostra duas fotos lado a lado, a mais antiga como "antes", com datas, dias entre elas e variação de peso. As fotos continuam só no aparelho.
+- Arquivo novo: `js/treino-pdf.js`. Sem campo novo nos dados.
+
+## Versão 5.4.0 — onda 2: trocas por grupo, treino em abas e adesão (em teste)
+
+- **Trocas por grupo:** ao substituir um alimento, aparecem chips de grupo (proteína, carboidrato, gordura, vegetal, fruta, laticínio, outros). Toda opção vem com a gramagem que mantém as calorias dentro de ±2%, e a diferença de proteína fica escrita ao lado. Respeita restrições alimentares e a lista de "evitar".
+- **Treino em abas:** uma aba por rotina, com o selo **HOJE** na rotina do dia (só em dia de treino) e **FEITO** na que já foi feita. Cada aba mostra "N exercícios · M séries".
+- **Adesão por pilar** (Progresso): 7 e 30 dias, de ontem para trás, a partir do primeiro dia de uso. **Água de 30 dias** em gráfico, com resumo em texto.
+- Arquivo novo: `js/trocas.js`. Sem campo novo nos dados. Corrigida a categoria de "Pão de alho".
+
+## Versão 5.3.0 — onda 1: pilares do dia (em teste)
+
+- **Déficit / Superávit / Manutenção** no cabeçalho, comparando a meta com o gasto que o próprio app usa.
+- **Anéis por pilar** (dieta, treino, água, suplementos, check-in), cada um com cor e nome. O percentual do dia é a média dos pilares que se aplicam hoje.
+- **Linha do tempo** na Missão do dia, por horário, com filtros (todos, pendentes, por domínio).
+- **Suplementos** como pilar: lista própria com horário e "tomei" por dia. Campo novo `suplementos` nos dados; quem já usava o app começa com a lista vazia e nada muda.
+- Arquivo novo: `js/pilares.js`.
+
 ## Versão 5.2.0 — ganho de massa, recuperação, hábitos e backup
 
 - **Ganhar massa.** Nova opção no primeiro acesso e nova fase do plano: superávit pequeno e controlado

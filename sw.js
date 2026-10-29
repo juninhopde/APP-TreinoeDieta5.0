@@ -14,7 +14,7 @@
    Food Facts nunca passam por aqui.
    ══════════════════════════════════════════════════════════ */
 
-const VERSAO = '5.2.1';
+const VERSAO = '5.5.0';
 const CACHE_NAME = 'ctrl-app-' + VERSAO;
 const PRAZO_REDE_MS = 4000;
 
@@ -23,7 +23,7 @@ const ARQUIVOS = [
   './js/dados.js', './js/dados-extra.js', './js/alimentos-mais.js', './js/restricoes.js', './js/treino.js', './js/perfil-core.js', './js/fotos.js',
   './js/metabolismo.js', './js/off.js', './js/analise2.js', './js/diagnostico.js', './js/cardapio.js',
   './js/coach.js', './js/registro-nl.js', './js/agente.js', './js/memoria.js', './js/fases.js',
-  './js/jejum.js', './js/saber.js', './js/assistente.js', './js/ia-externa.js', './js/ia-local.js', './js/foto-prato.js', './js/habitos.js', './js/backup.js',
+  './js/jejum.js', './js/saber.js', './js/assistente.js', './js/ia-externa.js', './js/ia-local.js', './js/foto-prato.js', './js/habitos.js', './js/pilares.js', './js/trocas.js','./js/backup.js', './js/treino-pdf.js',
   './js/onboarding.js', './js/app.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png'
 ];

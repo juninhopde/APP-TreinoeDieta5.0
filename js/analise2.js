@@ -279,7 +279,7 @@ function sindromes(achados, extra) {
       nome: 'Grupo muscular sem estímulo',
       o: 'Há músculos que sua rotina não treina de forma direta: ' + extra.orfaos.join(', ') + '.',
       evid: ['progressao'].filter(grave),
-      faz: 'Em déficit, músculo sem estímulo é o primeiro a ser consumido. Uma ou duas séries semanais já mudam esse quadro — não precisa de treino separado.'
+      faz: 'Músculo sem estímulo direto perde espaço no plano e, em déficit, é o primeiro a ser consumido. Uma ou duas séries semanais já mudam esse quadro — não precisa de treino separado.'
     });
   }
 

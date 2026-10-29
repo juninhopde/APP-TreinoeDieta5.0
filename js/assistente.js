@@ -46,10 +46,11 @@ const INTENCOES = [
   { id:'mudar-fase', peso: 9,
     kw:['entrar em manutencao','quero entrar em manutencao','quero ficar em manutencao','quero manter o peso',
         'parar de emagrecer','mudar para manutencao','voltar para perda','voltar a emagrecer',
-        'entrar em recuperacao','modo manutencao'],
+        'entrar em recuperacao','modo manutencao','quero ganhar massa','entrar em ganho de massa','modo ganho de massa','comecar a ganhar massa'],
     fn: (A,C,q) => {
       const n = norm(q||'');
-      const fase = /recupera/.test(n) ? 'recuperacao'
+      const fase = /ganhar massa|ganho de massa/.test(n) ? 'ganho'
+        : /recupera/.test(n) ? 'recuperacao'
         : /manutenc|manter|parar de emagrecer/.test(n) ? 'manutencao' : 'perda';
       return { tipo:'ferramenta', nome:'mudar_fase', args:{ fase } };
     } },
@@ -280,7 +281,7 @@ const INTENCOES = [
       const o = C.orfaos;
       const s = A.find(a=>a.id==='series-grupo');
       return (o && o.length
-        ? `Sua rotina não dá estímulo direto para: **${o.join(', ')}**.\n\nEm déficit, músculo sem estímulo é o primeiro a ser consumido. Uma ou duas séries por semana já mudam isso — não precisa de treino separado, dá pra encaixar no fim do A ou do B.`
+        ? `Sua rotina não dá estímulo direto para: **${o.join(', ')}**.\n\nMúsculo sem estímulo direto perde espaço no plano e, em déficit, é o primeiro a ser consumido. Uma ou duas séries por semana já mudam isso — não precisa de treino separado, dá pra encaixar no fim do A ou do B.`
         : 'Todos os grupos principais estão recebendo estímulo.')
         + (s ? '\n\n' + s.achado : '');
     } },
@@ -522,6 +523,11 @@ function pesoCorporalDe(texto) {
 function responderLivre(texto, A, C) {
   const kgDito = pesoCorporalDe(texto);
   if (kgDito != null) return { tipo:'registrar-peso', kg: kgDito };
+  /* "dormi mal", "dormi 5 horas", "estou exausto": vira o check-in de recuperação de hoje.
+     Pergunta ("estou cansado, devo treinar?") não grava nada e segue para as respostas normais. */
+  const eh = /\?/.test(String(texto)) || /\b(como|por que|porque|o que|devo|posso|quanto|qual)\b/.test(norm(texto));
+  const ck = !eh && typeof checkinPorFrase === 'function' ? checkinPorFrase(norm(texto)) : null;
+  if (ck) return { tipo:'checkin', campos: ck };
   const m = interpretar(texto);
   if (!m) {
     const top = A.filter(a=>a.sev==='critico'||a.sev==='atencao').slice(0,2);

@@ -47,7 +47,7 @@ const PADRAO = {
     intensidade: 'firme', modoCardapio: 'padrao',
     fasePlano: 'perda', faixaManut: null, regraAcao: null, transicaoVista: null,
     iaNome: 'Coach', evitarAlimentos: [], iaProv: 'gemini', iaModelo: '', iaLivre: false,
-    tema: 'claro', notifAtivo: false,
+    tema: 'claro', notifAtivo: false, fotoPratoOk: [],
     notif: [
       { id:'n1', hora:'07:15', txt:'Café da manhã — hora de registrar no app', dias:[0,1,2,3,4,5,6] },
       { id:'n2', hora:'10:00', txt:'Água — você já bebeu 1 L?',                          dias:[0,1,2,3,4,5,6] },
@@ -60,7 +60,9 @@ const PADRAO = {
   },
   diario: {}, pesos: [], rotinas: null, sessoes: [], sessaoAtiva: null,
   reavaliacoes: [], custom: [], receitas: [], favoritos: [], recentes: [], memoria: null,
-  coach: null, cardapio: null, compras: null, saberProprio: [], ciclos: [], logAgente: []
+  coach: null, cardapio: null, compras: null, saberProprio: [], ciclos: [], logAgente: [],
+  checkins: {}, revisao: { ultima: null }, conquistasVistas: [], conquistasInit: false, treinoLeve: null,
+  suplementos: { lista: [], tomados: {} }
 };
 
 let E = null;
@@ -162,6 +164,11 @@ function carregar() {
   if (!Array.isArray(E.coach.seguranca)) E.coach.seguranca = [];
   if (!Array.isArray(E.cfg.evitarAlimentos)) E.cfg.evitarAlimentos = [];
   if (!Array.isArray(E.cfg.notif)) E.cfg.notif = JSON.parse(JSON.stringify(PADRAO.cfg.notif));
+  if (!ehObjeto(E.checkins)) E.checkins = {};
+  Pilares.normalizar(E);
+  if (!ehObjeto(E.revisao)) E.revisao = { ultima: null };
+  if (!Array.isArray(E.conquistasVistas)) E.conquistasVistas = [];
+  if (!Array.isArray(E.cfg.restricoes)) E.cfg.restricoes = [];
   E.pesos = E.pesos.filter(p => ehObjeto(p) && /^\d{4}-\d{2}-\d{2}$/.test(p.d) && +p.kg > 0);
   E.sessoes = E.sessoes.filter(s => ehObjeto(s) && typeof s.d === 'string' && Array.isArray(s.ex || []));
   if (E.cfg.nome && !E.memoria.nome) E.memoria.nome = E.cfg.nome;
@@ -239,7 +246,10 @@ function calcularMetas(kg) {
   const tmb = 10*kg + 6.25*c.altura - 5*c.idade + (c.sexo==='m'?5:-161);
   const tdee = tmb * c.atividade;
   // o déficit escolhido nunca passa do teto proporcional ao gasto, além do piso de calorias
-  const deficit = Math.min(c.deficit, tdee * PC.TETO_DEFICIT);
+  // em ganho o "déficit" é negativo (superávit), limitado a 15% do gasto e a 500 kcal
+  const deficit = c.fasePlano === 'ganho'
+    ? Math.max(c.deficit, -Math.min(tdee * PC.TETO_SUPERAVIT, PC.TETO_SUPERAVIT_KCAL))
+    : Math.min(c.deficit, tdee * PC.TETO_DEFICIT);
   const kcal = Math.max(PISO_KCAL[c.sexo] || 1500, Math.round((tdee - deficit)/10)*10);
   const ideal = 25 * Math.pow(c.altura/100, 2);
   const ajust = kg > ideal ? ideal + 0.25*(kg-ideal) : kg;
@@ -250,8 +260,12 @@ function calcularMetas(kg) {
    Com meta baixa, o carboidrato mínimo (60 g) é tirado da gordura e nunca da proteína: forçar
    os 60 g faria os macros somarem mais calorias do que a própria meta. */
 function macrosDaMeta(kcal, ajust) {
-  const prot = Math.round(REF.protAlvo * ajust);
-  let gord = Math.round(0.8 * ajust);
+  // em ganho de massa: proteína 1,8 g/kg e gordura 0,9 g/kg (a mesma regra do primeiro acesso)
+  const ganho = E.cfg.fasePlano === 'ganho';
+  // como no primeiro acesso: em ganho, até IMC 30 a proteína e a gordura saem do peso real, não do ajustado
+  if (ganho) { const kg = pesoAtual(), h = E.cfg.altura / 100; if (kg / (h * h) <= 30) ajust = kg; }
+  const prot = Math.round((ganho ? 1.8 : REF.protAlvo) * ajust);
+  let gord = Math.round((ganho ? 0.9 : 0.8) * ajust);
   let carb = Math.round((kcal - prot*4 - gord*9)/4);
   if (carb < 60) {
     gord = Math.min(gord, Math.max(Math.round(0.5 * ajust), Math.floor((kcal - prot*4 - 60*4)/9)));
@@ -262,7 +276,7 @@ function macrosDaMeta(kcal, ajust) {
 /* Meta calórica da fase, com a altura: sem ela o bloqueio por IMC baixo não age. */
 function metaDaFase(fase, tdee) {
   return metaPorFase(fase, tdee, pesoAtual(), E.cfg.ritmoAlvo, PISO_KCAL[E.cfg.sexo] || 1500,
-                     estadoReganhoAtual(), E.cfg.altura);
+                     estadoReganhoAtual(), E.cfg.altura, E.cfg.nivel);
 }
 function aplicarMetas() {
   const m = calcularMetas();
@@ -370,7 +384,8 @@ function ritmoSemanal(dias) {
   const ps = ordPesos().filter(p => deIso(p.d) >= lim);
   if (ps.length < 2) return null;
   const span = diasEntre(ps[0].d, ps[ps.length-1].d);
-  if (span < 7) return null;
+  // em ganho o ritmo só vale com 2 semanas: água, sal e creatina movem 1 kg em poucos dias e pareceriam "ganho rápido demais"
+  if (span < (E.cfg.fasePlano === 'ganho' ? 14 : 7)) return null;
   const kgSem = (ps[ps.length-1].kg - ps[0].kg)/(span/7);
   return { kgSem, pct: Math.abs(kgSem)/ps[ps.length-1].kg, dias: span };
 }
@@ -429,6 +444,42 @@ function barra(rot, at, meta, cor) {
   return `<div class="macro"><div class="macro-cab"><span>${rot}</span><span><b>${Math.round(at)}</b> / ${meta} g</span></div>
     <div class="trilha"><div class="preenche${pct>100?' estourou':''}" style="width:${Math.min(100,pct).toFixed(1)}%;background:${cor}"></div></div></div>`;
 }
+/* Pilares de hoje: o mesmo resultado alimenta os anéis do cabeçalho e a linha do tempo. */
+function pilaresDoDia() {
+  const d = dia(), c = E.cfg, s = somaDia();
+  const sup = Pilares.doDia(E, HOJE);
+  return Pilares.calcular({
+    kcal: s.kcal, metaKcal: c.kcal,
+    treinoAplica: (c.diasTreino || [1,3,5]).includes(new Date().getDay()),
+    treinou: E.sessoes.some(x => x.d === HOJE && sessaoDeForca(x)),
+    aguaMl: d.agua * c.copoMl, aguaMeta: c.aguaMeta,
+    supTotal: sup.length, supTomados: sup.filter(x => x.tomado).length,
+    checkin: !!E.checkins[HOJE]
+  });
+}
+function anelPilar(i) {
+  const R = 15, C = 2 * Math.PI * R;
+  return `<svg viewBox="0 0 38 38" aria-hidden="true"><circle cx="19" cy="19" r="${R}" fill="none" stroke="#2C3331" stroke-width="5"/>
+    <circle cx="19" cy="19" r="${R}" fill="none" stroke="${i.cor}" stroke-width="5" stroke-linecap="butt"
+      stroke-dasharray="${(C * i.pct).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 19 19)"/></svg>`;
+}
+function pilaresHTML(r) {
+  const ap = r.itens.filter(i => i.aplica);
+  return `<div class="pil-dia"><b>${r.dia}%</b> do dia
+      <span>média de ${ap.length} ${ap.length === 1 ? 'pilar' : 'pilares'}</span></div>
+    <ul class="pil-lista">${ap.map(i => `<li class="pil" aria-label="${i.rot}: ${i.pctInt}%, ${i.det}${i.excesso ? ', acima da meta' : ''}">
+      ${anelPilar(i)}<span class="pil-rot">${i.rot}</span><span class="pil-pct">${i.excesso ? 'acima' : i.pctInt + '%'}</span></li>`).join('')}</ul>`;
+}
+
+/* Gasto que a meta usa como referência: o mesmo da meta adaptativa (fórmula misturada com o medido,
+   quando há dado suficiente). Assim o rótulo Déficit/Superávit concorda com a meta mostrada. */
+function gastoDoRotulo() {
+  const formula = calcularMetas().tdee;
+  if (!E.cfg.metaAdaptativa) return formula;
+  try { const g = gastoReal(); if (g.ok) return PC.gastoMisto(formula, g).tdee || formula; } catch (e) {}
+  return formula;
+}
+
 function pintarTopo() {
   const c = E.cfg, s = somaDia(), f = faseAtual();
   $('#topo-data').textContent = fmtData(HOJE);
@@ -442,6 +493,12 @@ function pintarTopo() {
   $('#kcal-rest').textContent = (rest<0?'+':'') + Math.abs(rest);
   $('#kcal-rest').style.color = rest<0 ? '#E0703F' : '';
   $('#kcal-sub').textContent = `${s.kcal} consumidas · meta ${c.kcal}`;
+  const bal = Pilares.balanco(gastoDoRotulo(), c.kcal), elBal = $('#kcal-bal');
+  elBal.hidden = !bal.rot;
+  elBal.className = 'anel-bal bal-' + (bal.tipo || 'x');
+  elBal.textContent = bal.tipo === 'manutencao' ? 'Manutenção · meta próxima do gasto'
+    : bal.rot ? `${bal.rot} de ${Math.abs(bal.diff)} kcal por dia` : '';
+  $('#pilares').innerHTML = pilaresHTML(pilaresDoDia());
   $('#barras').innerHTML = barra('Proteína',s.p,c.prot,'var(--prot)')
     + barra('Carboidrato',s.c,c.carb,'var(--carb)') + barra('Gordura',s.g,c.gord,'var(--gord)');
 }
@@ -558,6 +615,23 @@ function aderencia7d() {
   return aderencia(st);
 }
 
+let tlFiltro = 'todos';               // filtro da linha do tempo; só vale enquanto o app está aberto
+
+function abrirSuplementos(erro) {
+  const lista = Pilares.doDia(E, HOJE);
+  abrirGaveta('Suplementos', `
+    <p class="nota" style="margin-top:0">Cadastre o que você já toma. Eles entram na linha do tempo e no anel de
+    Suplementos. O app não recomenda suplemento nem dose: siga a orientação do seu médico ou nutricionista.</p>
+    ${lista.length ? lista.map(x => `<div class="hist"><div class="hist-esq"><b>${esc(x.nome)}</b>${esc([x.dose, x.hora].filter(Boolean).join(' · ') || 'sem horário')}</div>
+      <div class="item-dir"><button type="button" class="item-x" data-sup-rm="${esc(x.id)}" aria-label="Remover ${esc(x.nome)}">×</button></div></div>`).join('')
+      : '<p class="nota">Nenhum suplemento cadastrado.</p>'}
+    ${erro ? `<p class="nota" role="alert" style="color:var(--oxido)">${esc(erro)}</p>` : ''}
+    <label class="campo"><span>Nome</span><input type="text" id="sup-nome" maxlength="40" autocomplete="off" placeholder="ex.: creatina"></label>
+    <label class="campo"><span>Dose (opcional)</span><input type="text" id="sup-dose" maxlength="30" autocomplete="off" placeholder="ex.: 3 g"></label>
+    <label class="campo"><span>Horário (opcional)</span><input type="time" id="sup-hora"></label>
+    <button type="button" class="btn" id="sup-add" style="margin-top:8px">Adicionar</button>`);
+}
+
 function blocoMissao() {
   const tarefas = missaoHoje();
   const faseP = FASES_PLANO[E.cfg.fasePlano] || FASES_PLANO.perda;
@@ -566,8 +640,16 @@ function blocoMissao() {
   const trava = travaCobranca(E.coach.seguranca);
   const cb = cobrar(tarefas, E.cfg.intensidade, E.memoria.nome,
     trava ? { bloqueia:true, mensagem:'Cobrança suspensa por segurança. ' + String(trava.mensagem||'').split('\n')[0] } : null);
-  const feitas = tarefas.filter(t => t.status === 'concluida').length;
+  const agoraD = new Date();
+  const todos = Pilares.linhaDoTempo(tarefas, Pilares.doDia(E, HOJE), agoraD.getHours() * 60 + agoraD.getMinutes());
+  if (tlFiltro !== 'todos' && tlFiltro !== 'pendentes' && !todos.some(i => i.dom === tlFiltro)) tlFiltro = 'todos';
+  const vistos = Pilares.filtrar(todos, tlFiltro);
+  const feitas = todos.filter(t => t.status === 'concluida').length;
   const ICO = { concluida:'✓', pendente:'○', perdida:'!', reagendada:'→' };
+  const opcoes = [['todos','Todos'], ['pendentes','Pendentes']].concat(
+    ['dieta','treino','agua','suplementos'].filter(k => todos.some(i => i.dom === k)).map(k => [k, Pilares.DOMINIOS[k].rot]));
+  const filtros = `<div class="fb-chips tl-filtros" role="group" aria-label="Filtrar a linha do tempo">${opcoes.map(o =>
+    `<button type="button" class="fb-chip" data-tl="${o[0]}" aria-pressed="${tlFiltro === o[0]}">${o[1]}</button>`).join('')}</div>`;
   // quem criou o plano hoje ainda não tem uma semana para ser avaliada
   const comecouHoje = !!E.cfg.iniciadoEm && new Date(E.cfg.iniciadoEm).toDateString() === new Date().toDateString();
 
@@ -583,17 +665,25 @@ function blocoMissao() {
   }
 
   return `<div class="bloco missao"><div class="bloco-tit"><span>Missão do dia</span>
-      <b>${feitas}/${tarefas.length}</b></div>
+      <b>${feitas}/${todos.length}</b></div>
     <div class="fase-chip fb-${faseP.cor}">${esc(faseP.rot)}</div>
     <div class="coach-msg">${fmtMd(msg)}</div>
     ${cb.pedirJustificativa ? `<div class="causas">
       <div class="causas-tit">O que aconteceu?</div>
       ${CAUSAS.map(c=>`<button type="button" class="causa" data-causa="${cb.pedirJustificativa}|${c.id}">${esc(c.rot)}</button>`).join('')}
     </div>` : ''}
-    ${tarefas.map(t=>`<div class="tarefa ${t.status}">
-      <button type="button" class="tar-ck" data-tarefa="${esc(t.id)}" aria-label="Concluir ${esc(t.titulo)}">${ICO[t.status]}</button>
-      <span class="tar-txt"><b>${esc(t.titulo)}</b><small>${esc(t.detalhe||'')}${t.motivo?' · '+esc((CAUSAS.find(c=>c.id===t.motivo)||{}).rot||t.motivo):''}</small></span>
-      ${t.hora?`<span class="tar-h">${t.hora}</span>`:''}</div>`).join('')}
+    ${filtros}
+    ${vistos.length ? vistos.map(t => {
+      const dom = Pilares.DOMINIOS[t.dom];
+      const motivo = t.motivo ? (CAUSAS.find(c => c.id === t.motivo) || {}).rot || t.motivo : '';
+      const sub = [dom ? dom.rot : '', t.detalhe, motivo].filter(Boolean).join(' · ');
+      const chave = t.sup ? `data-sup="${esc(t.chave)}"` : `data-tarefa="${esc(t.chave)}"`;
+      return `<div class="tarefa ${t.status} dom-${t.dom}">
+      <button type="button" class="tar-ck" ${chave} aria-label="${t.sup ? 'Marcar como tomado: ' : 'Concluir '}${esc(t.titulo)}">${ICO[t.status]}</button>
+      <span class="tar-txt"><b>${esc(t.titulo)}</b><small>${esc(sub)}</small></span>
+      ${t.hora?`<span class="tar-h">${t.hora}</span>`:''}</div>`;
+    }).join('') : '<p class="nota">Nada nesta lista agora.</p>'}
+    <button type="button" class="btn vazado mini" id="sup-gerir" style="margin-top:8px">Suplementos</button>
     <div class="aderencia"><span>Aderência 7 dias</span>
       ${comecouHoje && !somaDia().itens
         ? '<b>começando hoje</b>'
@@ -602,11 +692,195 @@ function blocoMissao() {
   </div>`;
 }
 
+/* ══ HÁBITOS: backup, check-in, sequência e revisão da semana ═══ */
+let ciRascunho = {};                  // respostas do check-in ainda não salvas
+let ciRefazendo = false;              // true quando a pessoa pediu para refazer o check-in de hoje
+
+function blocoBackup() {
+  const v = backupVencido(E, HOJE);
+  if (!v.vencido) return '';
+  return `<div class="alerta ocre"><div class="alerta-tit">Faça um backup dos seus dados</div>
+    <p>${v.desde == null ? 'Você ainda não salvou nenhum backup.' : 'Faz ' + v.desde + ' dias do último backup.'}
+    Os dados ficam só neste aparelho: se o navegador for limpo ou o celular trocado, tudo se perde.</p>
+    <div class="linha-flex"><button type="button" class="btn mini" id="bk-agora">Salvar agora</button>
+    <button type="button" class="btn vazado mini" id="bk-depois">Depois</button></div></div>`;
+}
+
+function blocoCheckin() {
+  const ci = E.checkins[HOJE];
+  if (ci && !ciRefazendo) {
+    const av = avaliarRecuperacao(ci);
+    const tend = leituraTendencia(tendenciaRecuperacao(E, HOJE, 7));
+    return `<div class="bloco checkin-ok"><div class="bloco-tit"><span>Recuperação de hoje</span>
+      <b class="rec-${av.nivel}">${av.nivel === 'boa' ? 'boa' : av.nivel === 'media' ? 'mediana' : 'baixa'}</b></div>
+      <p style="font-size:13px;margin:0 0 6px">${esc(av.sugestao)}</p>
+      ${tend ? `<p class="nota" style="margin:0">${esc(tend)}</p>` : ''}
+      <button type="button" class="btn vazado mini" id="ci-refazer" style="margin-top:8px">Refazer check-in</button></div>`;
+  }
+  const grupos = CHECKIN_CAMPOS.map(cp => `<div class="kpi-rot" style="margin-top:8px">${esc(cp.rot)}</div>
+    <div class="fb-chips">${cp.ops.map(o => `<button type="button" class="fb-chip" data-ci="${cp.id}:${o[0]}"
+      aria-pressed="${String(ciRascunho[cp.id]) === String(o[0])}">${esc(o[1])}</button>`).join('')}</div>`).join('');
+  return `<div class="bloco"><div class="bloco-tit"><span>Como você está hoje?</span><b>10 segundos</b></div>
+    <p class="nota" style="margin:0">Responda o que quiser. O coach usa isso para sugerir um treino mais leve ou mais descanso quando for o caso.</p>
+    ${grupos}
+    <button type="button" class="btn mini" id="ci-salvar" style="margin-top:10px"${Object.keys(ciRascunho).length ? '' : ' disabled'}>Salvar check-in</button></div>`;
+}
+
+function blocoSequencia() {
+  const s = calcularSequencia(E, HOJE);
+  if (!s.atual && !s.melhor) return '';
+  const cq = listarConquistas(E, HOJE), n = cq.filter(c => c.feita).length;
+  return `<div class="bloco seq"><div class="bloco-tit"><span>Sequência</span><b>${s.atual} ${s.atual === 1 ? 'dia' : 'dias'}</b></div>
+    <p style="font-size:13px;margin:0">${s.hojeFeito ? 'Hoje já conta.' : 'Registre pelo menos duas refeições hoje para manter a sequência.'}
+    ${s.folga ? ' Você tem <b>1 folga</b> guardada: um dia sem registro não zera nada.' : ''}
+    ${s.folgaUsadaOntem ? ' Ontem a folga foi usada.' : ''} Melhor sequência: ${s.melhor}.</p>
+    <button type="button" class="btn vazado mini" id="ver-conquistas" style="margin-top:8px">Conquistas (${n} de ${cq.length})</button></div>`;
+}
+
+/* A revisão da semana aparece a cada 7 dias, desde que haja dado suficiente para dizer algo útil. */
+function revisaoDevida() {
+  const desde = diasDesde(E.revisao.ultima, HOJE);
+  if (desde != null && desde < 7) return null;
+  const r = resumoSemanal(E, HOJE);
+  return r.dados ? r : null;
+}
+function blocoRevisao() {
+  if (!revisaoDevida()) return '';
+  return `<div class="alerta"><div class="alerta-tit">Sua semana está pronta</div>
+    <p>Um resumo do que funcionou e de um único ajuste para a próxima semana.</p>
+    <button type="button" class="btn mini" id="ver-semana">Ver minha semana</button></div>`;
+}
+
+/* Avisa de conquista nova. Na primeira vez só marca o que já existia, para não despejar tudo de uma vez. */
+function verificarConquistas() {
+  const lista = listarConquistas(E, HOJE).filter(c => c.feita);
+  if (!E.conquistasInit) { E.conquistasVistas = lista.map(c => c.id); E.conquistasInit = true; gravar(); return; }
+  const novas = lista.filter(c => !E.conquistasVistas.includes(c.id));
+  if (!novas.length) return;
+  E.conquistasVistas = E.conquistasVistas.concat(novas.map(c => c.id)); gravar();
+  // se já há um aviso na tela (por exemplo o do backup), a conquista espera ele sair em vez de apagá-lo
+  const espera = $('#toast').hidden ? 400 : 3600;
+  setTimeout(() => toast('Conquista: ' + novas[0].rot + (novas.length > 1 ? ' (+' + (novas.length - 1) + ')' : ''), 4200), espera);
+}
+
+function abrirConquistas() {
+  const cq = listarConquistas(E, HOJE);
+  abrirGaveta('Conquistas', `<p class="nota" style="margin:0 0 8px">Cada uma mede algo que você fez de verdade, não tempo de uso.</p>` +
+    cq.map(c => `<div class="hist"><div class="hist-esq"><b>${esc(c.rot)}</b>${esc(c.desc)}</div>
+      <div style="color:${c.feita ? 'var(--sinal)' : 'var(--tinta2)'}">${c.feita ? 'feita' : 'a fazer'}</div></div>`).join(''));
+}
+
+function ctxRelatorio() {
+  const f = FASES_PLANO[E.cfg.fasePlano] || {};
+  return { nome: E.cfg.nome || E.memoria.nome, kcal: E.cfg.kcal, prot: E.cfg.prot, fase: f.rot || '' };
+}
+
+function abrirSemana() {
+  const r = resumoSemanal(E, HOJE);
+  const rec = r.recuperacao;
+  // o check-in pode ter só alguns campos: média ausente aparece como "—", nunca derruba a janela
+  const med = (v, d) => v == null ? '—' : br(v.toFixed(d == null ? 1 : d));
+  abrirGaveta('Sua semana', `
+    <div class="bloco"><div class="bloco-tit"><span>${fmtData(r.de)} a ${fmtData(r.ate)}</span><b>${r.diasRegistrados}/7 dias</b></div>
+      <div class="grade3">
+        <div><div class="kpi-num">${r.kcalMedia == null ? '—' : Math.round(r.kcalMedia)}</div><div class="kpi-rot">kcal médias</div></div>
+        <div><div class="kpi-num">${r.protMedia == null ? '—' : Math.round(r.protMedia)}<small>g</small></div><div class="kpi-rot">Proteína</div></div>
+        <div><div class="kpi-num">${r.treinos}<small>/${r.treinosPlanejados}</small></div><div class="kpi-rot">Treinos</div></div></div>
+      ${r.variacao != null ? `<p class="nota">Peso: ${br(r.pesoIni.toFixed(1))} → ${br(r.pesoFim.toFixed(1))} kg (${r.variacao > 0 ? '+' : ''}${br(r.variacao.toFixed(1))} kg).</p>` : ''}
+      ${rec ? `<p class="nota">Recuperação: sono médio ${med(rec.sono)} h, energia ${med(rec.energia)} de 5.</p>` : ''}</div>
+    <div class="alerta"><div class="alerta-tit">O que foi bem</div><p>${r.destaques.map(esc).join('<br>')}</p></div>
+    <div class="alerta ocre"><div class="alerta-tit">Um ajuste para a próxima semana</div><p>${esc(r.ajuste)}</p></div>
+    <div class="linha-flex"><button type="button" class="btn mini" id="rel-pdf" style="flex:1">Salvar como PDF</button>
+    <button type="button" class="btn vazado mini" id="rel-enviar" style="flex:1">Compartilhar</button></div>
+    <p class="nota">O PDF sai pela impressão do navegador: escolha "Salvar como PDF". Serve para mostrar a um nutricionista ou personal.</p>`);
+  // só depois de a janela abrir: se algo falhar antes, a revisão continua pendente em vez de sumir por 7 dias
+  E.revisao.ultima = HOJE; gravar(); pintarHoje();       // o card "Sua semana está pronta" sai da tela
+}
+
+/* Imprime o relatório da semana. O CSS de impressão esconde o resto do app. */
+function imprimirHtml(html) {
+  const alvo = $('#relatorio');
+  alvo.innerHTML = html;
+  alvo.hidden = false;
+  const limpar = () => { alvo.hidden = true; alvo.innerHTML = ''; window.removeEventListener('afterprint', limpar); };
+  window.addEventListener('afterprint', limpar);
+  setTimeout(() => window.print(), 80);
+}
+function imprimirRelatorio() {
+  imprimirHtml(htmlRelatorioSemanal(resumoSemanal(E, HOJE), ctxRelatorio()));
+}
+
+/* Compartilha um texto pelo menu do celular; sem suporte, copia. Devolve
+   'compartilhado' | 'copiado' | 'cancelado' | 'indisponivel'. */
+async function compartilharTexto(titulo, texto) {
+  try {
+    if (navigator.share) { await navigator.share({ title: titulo, text: texto }); return 'compartilhado'; }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return 'cancelado';       // fechou o menu: não é erro
+  }
+  try {
+    if (navigator.clipboard) { await navigator.clipboard.writeText(texto); return 'copiado'; }
+  } catch (e) {}
+  return 'indisponivel';
+}
+
+/* Dados de uma rotina para a folha de treino e para o texto compartilhado. */
+function dadosDoTreino(l) {
+  const f = faseAtual(), rot = E.rotinas[l];
+  const cardio = l === 'K';
+  return {
+    nome: E.cfg.nome || E.memoria.nome, data: HOJE, cardio,
+    titulo: (cardio ? 'Cardio' : 'Treino ' + l) + ' — ' + rot.nome,
+    fase: { nome: f.nome, series: f.series, repMin: f.repMin, repMax: f.repMax, rirAlvo: f.rirAlvo },
+    exercicios: rot.ex.map(e => {
+      const bib = EXERCICIOS.find(x => x.n === e.n) || {};
+      if (cardio) return { n: e.n, series: 1, gm: '', tempo: false, kg: null, reps: null,
+        alvo: e.repMin && e.repMax ? e.repMin + '–' + e.repMax + ' min' : '' };
+      const s = sugerir(e.n, f);
+      return { n: e.n, series: seriesDaFase(e, f, l), gm: bib.gm || '', tempo: !!bib.tempo, kg: s.kg, reps: s.reps };
+    })
+  };
+}
+
+/* Compartilha um arquivo pelo menu do celular (Drive, WhatsApp, e-mail) ou, sem suporte, baixa. */
+let compartilhando = false;
+async function compartilharArquivo(nome, texto, tipo, titulo) {
+  // toque duplo: o segundo share falha com erro que não é de cancelamento e caía no download, baixando o arquivo junto
+  if (compartilhando) return 'cancelado';
+  compartilhando = true;
+  try { return await _compartilharArquivo(nome, texto, tipo, titulo); } finally { compartilhando = false; }
+}
+async function _compartilharArquivo(nome, texto, tipo, titulo) {
+  try {
+    const arq = new File([texto], nome, { type: tipo });
+    if (navigator.canShare && navigator.canShare({ files: [arq] })) {
+      await navigator.share({ files: [arq], title: titulo || nome });
+      return 'compartilhado';
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return 'cancelado';        // a pessoa fechou o menu: não é erro nem baixa por conta própria
+  }
+  baixar(nome, texto, tipo);
+  return 'baixado';
+}
+
+async function salvarBackupAgora() {
+  const r = await compartilharArquivo('backup-controle-' + HOJE + '.json', textoDoBackup(E), 'application/json', 'Backup do Controle');
+  if (r === 'cancelado') return;
+  E.cfg.ultimoBackup = HOJE; gravar();
+  toast(r === 'baixado' ? 'Backup baixado. Guarde o arquivo num lugar seguro (Drive, e-mail).' : 'Backup enviado.', 4200);
+  pintarHoje(); if (!$('#tela-ajustes').hidden) pintarAjustes();
+}
+
 function pintarHoje() {
   const d = dia(), c = E.cfg;
   let h = '';
 
+  h += blocoBackup();
+  h += blocoRevisao();
   h += blocoMissao();
+  h += blocoCheckin();
+  h += blocoSequencia();
 
   const rv = reavaliacaoDevida();
   if (rv) {
@@ -619,7 +893,10 @@ function pintarHoje() {
 
   h += `<button type="button" class="btn foto-btn" id="ler-codigo">
     <svg viewBox="0 0 24 24"><path d="M3 5v14M6 5v14M9 5v14M13 5v14M16 5v14M19 5v14M21 5v14"/></svg>
-    Escanear código de barras</button>`;
+    Escanear código de barras</button>
+    <button type="button" class="btn foto-btn" id="foto-prato" style="margin-top:8px">
+    <svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg>
+    Foto do prato (IA)</button>`;
 
   REFS.forEach(r => {
     const itens = d.refs[r.id]||[], sr = somaRef(r.id);
@@ -669,6 +946,7 @@ function pintarHoje() {
       <a href="${AUTOR.wa}" target="_blank" rel="noopener">apoiar o projeto</a></p>`;
 
   $('#tela-hoje').innerHTML = h;
+  verificarConquistas();
 }
 
 /* ══ GAVETA ═══════════════════════════════════════════ */
@@ -739,7 +1017,8 @@ function listar(q) {
     ? `<li><button type="button" data-receita="${esc(a.receita.n)}"><span><b>${esc(a.receita.n)}</b><small>receita</small></span></button></li>`
     : `<li><button type="button" data-alim="${esc(a.n)}">
         <span><b>${E.favoritos.includes(a.n)?'<span class="marca-fav">★</span> ':''}${esc(a.n)}</b>
-        <small>${esc(a.cat)}${a.custom?' · meu':''} · P${a.p} C${a.c} G${a.g} /100g</small></span>
+        <small>${esc(a.cat)}${a.custom?' · meu':''} · P${a.p} C${a.c} G${a.g} /100g</small>
+        ${(E.cfg.restricoes||[]).length && avisosDoAlimento(a, E.cfg.restricoes).length ? `<small class="prev-aviso">${esc(avisosDoAlimento(a, E.cfg.restricoes).join(' · '))}</small>` : ''}</span>
         <span class="res-k">${kcalDe(a.p,a.c,a.g,a.alc)}</span></button></li>`).join('');
 }
 
@@ -861,33 +1140,35 @@ function abrirNovoAlimento() {
 /* ── substituição por equivalente ───────────────────── */
 function abrirSubstituicao(refId, idx) {
   const it = dia().refs[refId][idx];
-  const base = baseCompleta().find(a=>a.n===it.n);
-  const cands = baseCompleta().filter(a=>a.n!==it.n).map(a => {
-    const k100 = kcalDe(a.p,a.c,a.g,a.alc);
-    if (k100 <= 0) return null;
-    const gr = (it.kcal/k100)*100;
-    if (gr < 5 || gr > 1200) return null;
-    const prot = a.p*gr/100;
-    const dif = Math.abs(prot-it.p)/Math.max(1,it.p);
-    if (dif > 0.35) return null;
-    return { a, gr, prot, dif, mesmaCat: base && a.cat===base.cat };
-  }).filter(Boolean).sort((x,y)=>(y.mesmaCat-x.mesmaCat)||(x.dif-y.dif)).slice(0,12);
+  const evitar = E.cfg.evitarAlimentos || [];     // Ajustes promete: "as substituições param de sugerir estes"
+  const res = Trocas.candidatos(it, baseFiltrada(), baseCompleta(), evitar);
+  let grupo = Trocas.grupoInicial(res);
+  const chaves = Object.keys(Trocas.GRUPOS).filter(k => res.grupos[k] && res.grupos[k].length);
+
+  const chips = () => chaves.map(k => `<button type="button" class="fb-chip" data-trgrupo="${k}" aria-pressed="${k === grupo}">${Trocas.GRUPOS[k]}${k === res.atual ? ' (atual)' : ''}</button>`).join('');
+  const lista = () => (res.grupos[grupo] || []).map((x, i) => {
+    const dp = x.dp === 0 ? 'mesma proteína' : (x.dp > 0 ? '+' : '−') + br(Math.abs(x.dp)) + ' g de proteína';
+    return `<li><button type="button" data-sub="${i}">
+      <span><b>${esc(x.a.n)}</b><small>${x.gr} g · P ${br(x.p)} g (${dp}) · ${esc(x.a.cat)}</small></span>
+      <span class="res-k">${x.kcal}</span></button></li>`;
+  }).join('');
 
   abrirGaveta('Substituir '+it.n, `
     <div class="bloco"><div class="bloco-tit"><span>Item atual</span><b>${it.kcal} kcal</b></div>
       <div style="font-family:var(--mono);font-size:13px">${esc(it.n)} · P ${br(it.p)} g</div>
-      <p class="nota">Cada opção já vem com a gramagem que <b>iguala a caloria</b>, mantendo a proteína dentro de 35%.
-      Mesma categoria aparece primeiro.</p></div>
-    ${cands.length ? `<ul class="res">${cands.map((x,i)=>`<li><button type="button" data-sub="${i}">
-      <span><b>${esc(x.a.n)}</b><small>${Math.round(x.gr)} g · P ${br(x.prot.toFixed(1))} g · ${esc(x.a.cat)}</small></span>
-      <span class="res-k">${Math.round(kcalDe(x.a.p*x.gr/100, x.a.c*x.gr/100, x.a.g*x.gr/100, (x.a.alc||0)*x.gr/100))}</span></button></li>`).join('')}</ul>`
-      : '<div class="vazio">Nenhum equivalente próximo na base.</div>'}`);
+      <p class="nota">Cada opção vem com a gramagem que mantém as calorias dentro de <b>±2%</b>. A proteína pode mudar:
+      a diferença aparece ao lado de cada opção.</p></div>
+    ${chaves.length ? `<div class="fb-chips tl-filtros" id="tr-chips" role="group" aria-label="Grupo do alimento">${chips()}</div>
+      <ul class="res" id="tr-lista">${lista()}</ul>`
+      : '<div class="vazio">Nenhum equivalente dentro de ±2% das calorias na base.</div>'}`);
 
   $('#gaveta-corpo').addEventListener('click', ev => {
+    const g = ev.target.closest('[data-trgrupo]');
+    if (g) { grupo = g.dataset.trgrupo; $('#tr-chips').innerHTML = chips(); $('#tr-lista').innerHTML = lista(); return; }
     const b = ev.target.closest('[data-sub]');
     if (!b) return;
-    const x = cands[+b.dataset.sub], f = x.gr/100;
-    const novo = { n:x.a.n, q:Math.round(x.gr), u:'g',
+    const x = res.grupos[grupo][+b.dataset.sub], f = x.gr/100;
+    const novo = { n:x.a.n, q:x.gr, u:'g',
       p:+(x.a.p*f).toFixed(1), c:+(x.a.c*f).toFixed(1), g:+(x.a.g*f).toFixed(1),
       kcal:kcalDe(x.a.p*f, x.a.c*f, x.a.g*f, (x.a.alc||0)*f), h: it.h || horaAgora() };
     if (x.a.alc) novo.alc = +((x.a.alc)*f).toFixed(1);
@@ -896,6 +1177,70 @@ function abrirSubstituicao(refId, idx) {
   });
 }
 
+
+/* ══ FOTO DO PRATO ════════════════════════════════════
+   A foto vai ao provedor de IA que a pessoa configurou (chave própria), uma
+   confirmação por provedor. O que volta é só uma lista de alimentos com gramas:
+   vira uma frase e cai na prévia editável do chat, que a pessoa confere antes
+   de gravar. */
+async function fotoDoPrato(arquivo) {
+  const prov = provedorDeVisao(E.cfg.iaProv);
+  if (!prov) {
+    abrirGaveta('Foto do prato', `
+      <div class="alerta"><div class="alerta-tit">Precisa de uma chave de IA</div>
+      <p>Reconhecer comida numa foto exige um modelo de visão. O app não tem servidor nem chave própria:
+      você usa a sua, do <b>Google Gemini</b> (tem camada gratuita), <b>OpenAI</b> ou <b>Claude</b>.
+      Groq e OpenRouter não servem para isso.</p></div>
+      <button type="button" class="btn" id="fp-ajustes">Configurar em Ajustes</button>
+      <p class="nota">Enquanto isso, o registro por texto ("comi 150 g de arroz e um bife") e o código de barras funcionam normalmente.</p>`);
+    return;
+  }
+  let blob;
+  try { blob = await comprimirImagem(arquivo, 1024, 0.8); }
+  catch (e) { toast('Não consegui abrir essa imagem.'); return; }
+  const rot = IA_PROVEDORES[prov].rot;
+  if ((E.cfg.fotoPratoOk || []).includes(prov)) { enviarFotoPrato(prov, blob); return; }
+  abrirGaveta('Enviar a foto?', `
+    <img class="foto-cheia" alt="Foto do prato escolhida" src="${urlFoto(blob)}" style="max-height:240px;object-fit:contain">
+    <div class="alerta ocre"><div class="alerta-tit">A foto sai do seu aparelho</div>
+    <p>Para identificar os alimentos, a imagem será enviada para <b>${esc(rot)}</b>, com a sua chave.
+    Esta é a única função do app que envia uma imagem. ${esc(IA_PROVEDORES[prov].privacidade)}</p></div>
+    <div class="linha-flex"><button type="button" class="btn" id="fp-ok" style="flex:1">Enviar e analisar</button>
+    <button type="button" class="btn vazado" id="fp-no">Cancelar</button></div>`);
+  $('#gaveta-corpo').addEventListener('click', ev => {
+    if (ev.target.id === 'fp-no') { fecharGaveta(); return; }
+    if (ev.target.id !== 'fp-ok') return;
+    E.cfg.fotoPratoOk = (E.cfg.fotoPratoOk || []).concat(prov); gravar();
+    enviarFotoPrato(prov, blob);
+  });
+}
+
+async function enviarFotoPrato(prov, blob) {
+  abrirGaveta('Analisando a foto', '<div class="carregando"><div class="spin"></div><p>Identificando os alimentos…</p></div>');
+  const meuId = gavetaId;
+  try {
+    const itens = await visaoPratoIA(prov, prov === E.cfg.iaProv ? (E.cfg.iaModelo || undefined) : undefined, blob);
+    if (meuId !== gavetaId) return;              // a pessoa fechou a janela enquanto esperava
+    if (!itens.length) {
+      abrirGaveta('Foto do prato', `<div class="alerta ocre"><div class="alerta-tit">Não identifiquei comida</div>
+        <p>Tente uma foto de cima, com boa luz e o prato inteiro à vista. Ou registre por texto.</p></div>
+        <button type="button" class="btn vazado mini" id="fp-fechar">Fechar</button>`);
+      $('#gaveta-corpo').addEventListener('click', ev => { if (ev.target.id === 'fp-fechar') fecharGaveta(); });
+      return;
+    }
+    chatHist.push({ r:'eu', t:'Foto do prato' });
+    chatHist.push({ r:'ia', t:'Pela foto, identifiquei: ' + itens.map(a => `**${a.nome}** (~${a.gramas} g)`).join(', ') +
+      '.\n\nAs gramas são **estimativa da IA** a partir da imagem: confira e ajuste na prévia antes de gravar.' });
+    executarAcao({ tipo:'registrar', frase: frasePeloPrato(itens) }, diagnosticar(ctxDiag()), ctxAssist());
+    abrirChat();
+  } catch (err) {
+    if (meuId !== gavetaId) return;
+    abrirGaveta('Foto do prato', `<div class="alerta ocre"><div class="alerta-tit">Não consegui analisar</div><p>${esc(err.message)}</p></div>
+      <p class="nota">Você pode registrar por texto: "comi 150 g de arroz e um bife".</p>
+      <button type="button" class="btn vazado mini" id="fp-fechar">Fechar</button>`);
+    $('#gaveta-corpo').addEventListener('click', ev => { if (ev.target.id === 'fp-fechar') fecharGaveta(); });
+  }
+}
 
 /* ══ CÓDIGO DE BARRAS ═════════════════════════════════ */
 let leitor = null;
@@ -1050,7 +1395,7 @@ function blocoGrupos() {
       <span class="gm-n gm-${l.av}">${l.n}</span></div>`).join('')}
     <div class="gm-escala"><span>0</span><span>faixa de trabalho ${FAIXA_SERIES.ideal[0]}–${FAIXA_SERIES.ideal[1]}</span><span>${max}</span></div>
     ${orf.length ? `<div class="alerta ocre" style="margin-top:11px"><div class="alerta-tit">Sem estímulo direto</div>
-      <p>${esc(orf.join(', '))}. Em déficit, músculo sem estímulo é o primeiro a ser consumido.
+      <p>${esc(orf.join(', '))}. Músculo sem estímulo direto perde espaço no plano e, em déficit, é o primeiro a ser consumido.
       Uma ou duas séries por semana já mudam isso.</p></div>` : ''}
     <p class="nota">Séries semanais por músculo é a métrica que a literatura aponta como principal motor de
     hipertrofia — mais do que o volume em quilos. Série de aquecimento não entra na conta.</p></div>`;
@@ -1092,7 +1437,7 @@ function blocoVolume() {
   return `<div class="bloco"><div class="bloco-tit"><span>Volume por músculo — 7 dias</span><b>${br(+tot.toFixed(0))} séries</b></div>
     ${ms.map(m => linhaVolume(PC.MUSCULOS_ROT[m], feito[m] || 0, plano[m] || 0, m)).join('')}
     ${semEstimulo.length ? `<div class="alerta ocre" style="margin-top:11px"><div class="alerta-tit">Sem estímulo direto na sua rotina</div>
-      <p>${esc(semEstimulo.join(', '))}. Em déficit, músculo sem estímulo é o primeiro a ser consumido. Uma ou duas séries por semana já mudam isso.</p></div>` : ''}
+      <p>${esc(semEstimulo.join(', '))}. Músculo sem estímulo direto perde espaço no plano e, em déficit, é o primeiro a ser consumido. Uma ou duas séries por semana já mudam isso.</p></div>` : ''}
     <p class="nota">Barra verde = faixa produtiva; amarela = mínimo ou alto; vermelha = abaixo do mínimo ou acima do teto de recuperação.
     Sinergistas contam meia série (o supino conta para o tríceps). Aquecimento não entra. ${emDeficitAgora() ? 'Em déficit o topo da faixa cai 15%.' : ''}
     São faixas de trabalho, não lei.</p></div>`;
@@ -1191,6 +1536,56 @@ function abrirFeedbackVolume(sessao) {
   });
 }
 
+/* Treino do dia em abas: uma por rotina, com o selo HOJE na que a pessoa deve fazer hoje
+   (só em dia de treino e enquanto nenhum treino de força foi feito) e FEITO na que já fez. */
+let trAba = null;                     // aba aberta; só vale enquanto o app está aberto
+
+function selosDoTreino() {
+  const feitas = E.sessoes.filter(s => s.d === HOJE && sessaoDeForca(s)).map(s => s.rotina);
+  const diaDeTreino = (E.cfg.diasTreino || [1,3,5]).includes(new Date().getDay());
+  const prox = proximaRotina();
+  const selos = {};
+  feitas.forEach(l => { selos[l] = 'FEITO'; });
+  if (diaDeTreino && !feitas.length) selos[prox] = 'HOJE';
+  return { selos, prox, hoje: !feitas.length && diaDeTreino ? prox : null };
+}
+
+function resumoRotina(l, f) {
+  const ex = ((E.rotinas[l] || {}).ex) || [];
+  if (l === 'K') return ex.length + (ex.length === 1 ? ' atividade' : ' atividades');
+  const series = ex.reduce((t, e) => t + seriesDaFase(e, f, l), 0);
+  return `${ex.length} ${ex.length === 1 ? 'exercício' : 'exercícios'} · ${series} ${series === 1 ? 'série' : 'séries'}`;
+}
+
+function blocoAbasTreino(f) {
+  const ids = letras().concat(['K']).filter(l => E.rotinas[l]);
+  const { selos, prox } = selosDoTreino();
+  if (!trAba || !ids.includes(trAba)) trAba = ids.includes(prox) ? prox : ids[0];
+  const aba = trAba, rot = E.rotinas[aba];
+  const abas = ids.map(l => `<button type="button" role="tab" class="aba" id="aba-${l}" data-aba="${l}"
+    aria-selected="${l === aba}" aria-controls="tr-painel" tabindex="${l === aba ? 0 : -1}">${l === 'K' ? 'Cardio' : 'Treino ' + l}${selos[l] ? `<small class="aba-selo${selos[l] === 'FEITO' ? ' feito' : ''}">${selos[l]}</small>` : ''}</button>`).join('');
+
+  let corpo;
+  if (aba === 'K') {
+    corpo = rot.ex.map(e => `<div class="hist"><div class="hist-esq"><b>${esc(e.n)}</b>sem carga: registre o tempo</div></div>`).join('');
+  } else {
+    corpo = rot.ex.map(e => {
+      const s = sugerir(e.n, f);
+      return `<div class="hist"><div class="hist-esq"><b>${esc(e.n)}</b>${esc(s.msg)}</div>
+        <div style="text-align:right;white-space:nowrap">${s.kg?`<span class="${s.sobe?'sobe':s.desce?'desce':''}">${br(s.kg)} kg</span>`:'—'}<br>
+        <span style="color:var(--tinta2)">${s.reps} reps</span></div></div>`;
+    }).join('') + `<p class="nota">Progressão dupla: a carga só sobe quando você fecha ${f.repMax} reps em <b>todas</b> as séries com RIR ${f.rirAlvo} ou menos.</p>`;
+  }
+  return `<div class="abas" role="tablist" aria-label="Treinos do plano">${abas}</div>
+    <div class="bloco aba-painel" role="tabpanel" id="tr-painel" aria-labelledby="aba-${aba}">
+      <div class="bloco-tit"><span>${esc(rot.nome)}</span><b>${resumoRotina(aba, f)}</b></div>
+      <button type="button" class="btn" data-iniciar="${aba}" style="margin-bottom:8px">${aba === 'K' ? 'Iniciar cardio' : 'Iniciar treino ' + aba}</button>
+      <div class="linha-flex" style="margin-bottom:10px">
+        <button type="button" class="btn vazado mini" data-treino-pdf="${aba}" style="flex:1">Salvar em PDF</button>
+        <button type="button" class="btn vazado mini" data-treino-env="${aba}" style="flex:1">Compartilhar</button></div>
+      ${corpo || '<div class="vazio">Esta rotina não tem exercícios.</div>'}</div>`;
+}
+
 function pintarTreino() {
   const f = faseAtual(), sem = semanaNoCiclo();
   let h = `<div class="bloco fase"><div class="bloco-tit"><span>Ciclo ${cicloNum()} · semana ${sem} de 12</span><b>${esc(f.nome)}</b></div>
@@ -1204,23 +1599,15 @@ function pintarTreino() {
     <p class="nota">${esc(f.nota)}</p></div>`;
 
   if (!E.sessaoAtiva) {
+    const av = avaliarRecuperacao(E.checkins[HOJE]);
+    if (av && av.nivel !== 'boa') {
+      h += `<div class="alerta ocre"><div class="alerta-tit">Recuperação ${av.nivel === 'baixa' ? 'baixa' : 'mediana'} hoje</div>
+        <p>${esc(av.sugestao)}</p>
+        ${E.treinoLeve === HOJE ? '<p class="nota" style="margin:0">Versão leve ligada para hoje.</p>'
+          : '<button type="button" class="btn mini" id="tr-leve">Fazer a versão leve</button>'}</div>`;
+    }
     h += blocoVolume();
-    const prox = proximaRotina();
-    h += `<div class="bloco"><div class="bloco-tit"><span>Próxima sessão</span><b>${E.sessoes.length} feitas</b></div>
-      <div style="margin-bottom:10px"><span class="selo">${esc(E.rotinas[prox].nome)}</span></div>
-      <button type="button" class="btn" data-iniciar="${prox}" style="margin-bottom:8px">Iniciar treino ${prox}</button>
-      <div class="linha-flex" style="flex-wrap:wrap">
-        ${letras().filter(l => l !== prox).map(l => `<button type="button" class="btn vazado mini" style="flex:1 1 auto" data-iniciar="${l}">Treino ${l}</button>`).join('')}
-        <button type="button" class="btn vazado mini" style="flex:1 1 auto" data-iniciar="K">Cardio</button></div></div>`;
-
-    h += `<div class="bloco"><div class="bloco-tit"><span>Cargas sugeridas</span><b>${esc(E.rotinas[prox].nome)}</b></div>`;
-    h += E.rotinas[prox].ex.map(e => {
-      const s = sugerir(e.n, f);
-      return `<div class="hist"><div class="hist-esq"><b>${esc(e.n)}</b>${esc(s.msg)}</div>
-        <div style="text-align:right;white-space:nowrap">${s.kg?`<span class="${s.sobe?'sobe':s.desce?'desce':''}">${br(s.kg)} kg</span>`:'—'}<br>
-        <span style="color:var(--tinta2)">${s.reps} reps</span></div></div>`;
-    }).join('');
-    h += `<p class="nota">Progressão dupla: a carga só sobe quando você fecha ${f.repMax} reps em <b>todas</b> as séries com RIR ${f.rirAlvo} ou menos.</p></div>`;
+    h += blocoAbasTreino(f);
 
     const s7 = E.sessoes.filter(s=>diasEntre(s.d,HOJE)<7);
     const vol = s7.reduce((t,s)=>t+(s.ex||[]).reduce((u,e)=>u+(e.series||[]).reduce((v,x)=>v+(x.t==='w'?0:(+x.kg||0)*(+x.reps||0)),0),0),0);
@@ -1251,7 +1638,8 @@ function pintarTreino() {
     const tot = s.ex.reduce((t,e)=>t+e.series.length,0);
     h += `<div class="bloco"><div class="bloco-tit"><span>Em andamento</span><b>${min} min</b></div>
       <span class="selo ok">${esc(E.rotinas[s.rotina].nome)}</span>
-      <span style="font-family:var(--mono);font-size:12px;color:var(--tinta2)"> ${ok}/${tot} séries</span></div>`;
+      <span style="font-family:var(--mono);font-size:12px;color:var(--tinta2)"> ${ok}/${tot} séries</span>
+      ${s.leve ? '<p class="nota" style="margin:8px 0 0">Versão leve: pare 1 a 2 repetições antes da falha em todas as séries.</p>' : ''}</div>`;
 
     s.ex.forEach((e, ei) => {
       const sug = e.sug||{}, bib = EXERCICIOS.find(x=>x.n===e.n)||{};
@@ -1307,11 +1695,14 @@ function textoUltimaVez(nome) {
 function iniciarSessao(rot) {
   const f = faseAtual(), r = E.rotinas[rot];
   if (!r) { toast('Rotina não encontrada.'); return; }
-  E.sessaoAtiva = { d:HOJE, rotina:rot, fase:f.nome, semana:semanaCiclo(), ini:Date.now(),
+  // versão leve (pedida pelo check-in): uma série a menos por exercício de 3 séries ou mais, nunca abaixo de 2
+  const leve = E.treinoLeve === HOJE && rot !== 'K';
+  const nSeries = e => { const n = seriesDaFase(e, f, rot); return leve && n >= 3 ? n - 1 : n; };
+  E.sessaoAtiva = { d:HOJE, rotina:rot, fase:f.nome, semana:semanaCiclo(), ini:Date.now(), leve,
     ex: r.ex.map(e => ({ n:e.n, sug:sugerir(e.n,f), ant:textoUltimaVez(e.n), desc:e.descanso || 0,
-      series: Array.from({length:seriesDaFase(e,f,rot)}, () => ({ kg:'', reps:'', rir:'', t:'', ok:false })) })) };
+      series: Array.from({length:nSeries(e)}, () => ({ kg:'', reps:'', rir:'', t:'', ok:false })) })) };
   gravar(); pintarTreino();
-  toast(f.nome+' · '+f.repMin+'–'+f.repMax+' repetições, RIR '+f.rirAlvo);
+  toast(leve ? 'Versão leve: uma série a menos e pare 1 a 2 repetições antes da falha.' : f.nome+' · '+f.repMin+'–'+f.repMax+' repetições, RIR '+f.rirAlvo, leve ? 4200 : undefined);
 }
 function encerrarSessao() {
   const s = E.sessaoAtiva;
@@ -1460,8 +1851,8 @@ function blocoGasto() {
       é o que torna o número confiável.</p></div>` : ''}
 
     <div class="bloco" style="margin:11px 0 0;border:0;padding:0">
-      <label class="campo"><span>Ritmo alvo de perda</span><select id="cfg-ritmo">
-        ${RITMOS.map(r=>`<option value="${r.v}"${E.cfg.ritmoAlvo==r.v?' selected':''}>${esc(r.rot)}</option>`).join('')}</select></label>
+      ${E.cfg.fasePlano === 'ganho' ? '' : `<label class="campo"><span>Ritmo alvo de perda</span><select id="cfg-ritmo">
+        ${RITMOS.map(r=>`<option value="${r.v}"${E.cfg.ritmoAlvo==r.v?' selected':''}>${esc(r.rot)}</option>`).join('')}</select></label>`}
       <label class="campo"><span>Meta calórica</span><select id="cfg-adapt">
         <option value="1"${E.cfg.metaAdaptativa?' selected':''}>Automática — segue o gasto medido</option>
         <option value="0"${!E.cfg.metaAdaptativa?' selected':''}>Manual — eu defino</option></select></label>
@@ -1470,8 +1861,10 @@ function blocoGasto() {
     <div class="alerta"><div class="alerta-tit">Meta sugerida</div>
       <p style="margin-bottom:6px">Gasto usado no cálculo: <b>${mix.tdee} kcal</b> — ${Math.round(mix.peso*100)}% medido e ${100-Math.round(mix.peso*100)}% fórmula.
       A parte medida cresce com a confiança e nunca passa de 90%.</p>
-      <p><b>${m.kcal} kcal/dia</b> — déficit de ${m.deficit}, que projeta ${br(m.ritmoReal)}% do peso por semana.
-      ${m.bloqueado ? ' ' + esc(m.nota || '') : (m.limitado ? ' O déficit foi limitado: o pedido passava de ' + Math.round(PC.TETO_DEFICIT*100) + '% do gasto ou do piso de segurança.' : '')}
+      <p><b>${m.kcal} kcal/dia</b> — ${E.cfg.fasePlano === 'ganho'
+        ? `superávit de ${m.superavit != null ? m.superavit : Math.abs(m.deficit)} kcal, que projeta ganho de ${br(Math.abs(m.ritmoReal))}% do peso por semana.`
+        : `déficit de ${m.deficit}, que projeta ${br(m.ritmoReal)}% do peso por semana.`}
+      ${m.bloqueado ? ' ' + esc(m.nota || '') : (m.limitado ? (E.cfg.fasePlano === 'ganho' ? ' O superávit foi limitado: o pedido passava de ' + Math.round(PC.TETO_SUPERAVIT*100) + '% do gasto ou de ' + PC.TETO_SUPERAVIT_KCAL + ' kcal.' : ' O déficit foi limitado: o pedido passava de ' + Math.round(PC.TETO_DEFICIT*100) + '% do gasto ou do piso de segurança.') : '')}
       ${E.cfg.metaAdaptativa ? (E.cfg.kcal === m.kcal ? ' Já aplicada.' : '') : ' Você está no modo manual, então ela não foi aplicada.'}</p>
       ${E.cfg.metaAdaptativa && E.cfg.kcal !== m.kcal ? '<button type="button" class="btn mini" id="aplicar-adapt">Aplicar agora</button>' : ''}
     </div></div>`;
@@ -1579,7 +1972,8 @@ function serieTendencia() {
 }
 function faixaAtual() {
   if (E.cfg.faixaManut) return E.cfg.faixaManut;
-  return E.cfg.fasePlano === 'perda' ? null : faixaManutencao(E.cfg.pesoMeta);
+  // perda e ganho perseguem um peso-alvo; só manutenção e recuperação têm faixa
+  return (E.cfg.fasePlano === 'perda' || E.cfg.fasePlano === 'ganho') ? null : faixaManutencao(E.cfg.pesoMeta);
 }
 function estadoReganhoAtual() {
   const f = faixaAtual();
@@ -1594,9 +1988,13 @@ function tendAtual() {
 /* Devolve { ok:true } ou { ok:false, texto } quando a fase pedida não é segura:
    déficit (perda ou recuperação) não entra para quem está com IMC abaixo de 19. */
 function entrarEmFase(fase, pesoBase) {
-  if (fase !== 'manutencao') {
+  // déficit (perda, recuperação) não entra com IMC baixo; superávit (ganho) não entra com IMC alto
+  if (fase === 'perda' || fase === 'recuperacao') {
     const pp = PC.perdaPermitida(pesoAtual(), E.cfg.altura);
     if (!pp.ok) return { ok: false, texto: pp.texto };
+  } else if (fase === 'ganho') {
+    const gp = PC.ganhoPermitido(pesoAtual(), E.cfg.altura);
+    if (!gp.ok) return { ok: false, texto: gp.texto + ' Por isso a fase atual não foi alterada.' };
   }
   const antes = E.cfg.fasePlano;
   // fecha o ciclo anterior antes de abrir o novo
@@ -1614,14 +2012,24 @@ function entrarEmFase(fase, pesoBase) {
     E.cfg.faixaManut = faixaManutencao(pesoBase || tendAtual() || pesoAtual());
     E.cfg.autoRecalc = false; E.cfg.metaAdaptativa = true;
   }
-  if (fase === 'perda') E.cfg.faixaManut = null;
-  if (!aplicarMetaAdaptativa(true)) {
+  if (fase === 'perda' || fase === 'ganho') E.cfg.faixaManut = null;
+  // ganho com a meta de peso já alcançada (veio de perda): sem nova meta, o app diria "você chegou" no mesmo instante
+  if (fase === 'ganho' && !(E.cfg.pesoMeta > pesoAtual() + 0.5)) {
+    const kg = pesoAtual();   // +4%, sem passar do peso em que o IMC chega ao limite que o app bloqueia para ganho
+    E.cfg.pesoMeta = +Math.min(kg * 1.04, Math.max(kg, PC.pesoDeImc(PC.IMC_MAX_GANHO - 0.1, E.cfg.altura))).toFixed(1);
+  }
+  const adapt = aplicarMetaAdaptativa(true);
+  let m = adapt ? adapt.m : null;
+  if (!adapt) {
     // sem gasto medido (pouco diário ou meta manual), a meta da nova fase sai do gasto por fórmula;
     // antes a meta de déficit continuava valendo mesmo depois de escolher manutenção
-    const m = metaDaFase(fase, calcularMetas().tdee);
+    m = metaDaFase(fase, calcularMetas().tdee);
     E.cfg.kcal = m.kcal;
     redistribuirMacros();
   }
+  // o déficit guardado acompanha a fase: sem isso, quem saía de perda para ganho (ou o inverso) voltava à meta
+  // da fase antiga na primeira pesagem, quando as metas são recalculadas a partir de cfg.deficit
+  if (antes !== fase && m && typeof m.deficit === 'number') E.cfg.deficit = m.deficit;
   gravar();
   return { ok: true };
 }
@@ -1733,6 +2141,96 @@ function blocoFase() {
   return h;
 }
 
+/* ══ ADESÃO POR PILAR E ÁGUA DO MÊS ═══════════════════ */
+/* Primeiro dia em que a pessoa realmente usou o app: dias anteriores não contam como falha. */
+function inicioDeUso() {
+  const c = [];
+  Object.keys(E.diario).forEach(k => {
+    const d = E.diario[k];
+    if (d && (Object.keys(d.refs || {}).some(r => (d.refs[r] || []).length) || d.agua || d.passos)) c.push(k);
+  });
+  E.pesos.forEach(p => c.push(p.d));
+  E.sessoes.forEach(s => c.push(s.d));
+  if (E.cfg.iniciadoEm && !isNaN(new Date(E.cfg.iniciadoEm))) c.push(iso(new Date(E.cfg.iniciadoEm)));
+  c.sort();
+  return c[0] || null;
+}
+
+/* `n` dias fechados (de ontem para trás), em ordem cronológica. */
+function diasFechados(n) {
+  const l = [];
+  for (let i = n; i >= 1; i--) { const d = new Date(); d.setDate(d.getDate() - i); l.push(iso(d)); }
+  return l;
+}
+
+/* Entrada de Pilares.calcular() para um dia passado. Sem registro, o dia conta como zero
+   (a falta é o que a adesão mede), mas só a partir do primeiro dia de uso. As metas de hoje
+   valem para todos os dias da janela: o app não guarda a meta de cada dia. */
+function leitorPilares() {
+  const ini = inicioDeUso(), c = E.cfg;
+  const tom = Pilares.normalizar(E).tomados, nSup = E.suplementos.lista.length;
+  const supIni = Object.keys(tom).sort()[0] || null;   // antes da primeira marcação, suplemento não conta
+  return k => {
+    if (!ini || k < ini) return null;
+    const reg = E.diario[k];
+    return {
+      kcal: reg ? somaDia(k).kcal : 0, metaKcal: c.kcal,
+      treinoAplica: (c.diasTreino || [1,3,5]).includes(deIso(k).getDay()),
+      treinou: E.sessoes.some(x => x.d === k && sessaoDeForca(x)),
+      aguaMl: reg ? (reg.agua || 0) * c.copoMl : 0, aguaMeta: c.aguaMeta,
+      supTotal: supIni && k >= supIni ? nSup : 0, supTomados: (tom[k] || []).length,
+      checkin: !!E.checkins[k]
+    };
+  };
+}
+
+function blocoAdesaoPilares() {
+  const ini = inicioDeUso();
+  if (!ini || ini >= HOJE) {
+    return `<div class="bloco"><div class="bloco-tit"><span>Adesão por pilar</span></div>
+      <p class="nota" style="margin:0">Aparece quando houver pelo menos um dia fechado de uso. Hoje ainda não conta.</p></div>`;
+  }
+  const leitor = leitorPilares();
+  const a7 = Pilares.aderencia(diasFechados(7), leitor), a30 = Pilares.aderencia(diasFechados(30), leitor);
+  const v = x => x == null ? '—' : x + '%';
+  const linhas = Object.keys(Pilares.DOMINIOS).filter(id => a30.porPilar[id].aplic || a7.porPilar[id].aplic).map(id => {
+    const d = Pilares.DOMINIOS[id], p7 = a7.porPilar[id], p30 = a30.porPilar[id];
+    return `<tr><th scope="row"><i style="background:${d.cor}" aria-hidden="true"></i>${d.rot}</th>
+      <td>${v(p7.pct)}</td><td>${v(p30.pct)}</td>
+      <td class="ad-barra" aria-hidden="true"><span style="width:${p30.pct || 0}%;background:${d.cor}"></span></td></tr>`;
+  }).join('');
+  return `<div class="bloco"><div class="bloco-tit"><span>Adesão por pilar</span><b>${a30.dias} ${a30.dias === 1 ? 'dia' : 'dias'}</b></div>
+    <table class="ad-tab"><thead><tr><th scope="col">Pilar</th><th scope="col">7 dias</th><th scope="col">30 dias</th><th scope="col"><span class="oculto">Barra</span></th></tr></thead>
+      <tbody>${linhas}</tbody>
+      <tfoot><tr><th scope="row">Média do dia</th><td>${v(a7.media)}</td><td>${v(a30.media)}</td><td></td></tr></tfoot></table>
+    <p class="nota">Conta de ontem para trás, a partir do dia em que você começou. Dia cumprido: dieta e água com pelo menos 80% da meta
+    (dieta sem passar de 105%); treino, suplementos e check-in completos. As metas de hoje valem para todos os dias.</p></div>`;
+}
+
+function blocoAguaMes() {
+  const c = E.cfg, ini = inicioDeUso();
+  if (!ini) return '';
+  const dias = [];
+  for (let i = 29; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); dias.push(iso(d)); }
+  const ml = dias.map(k => (E.diario[k] && E.diario[k].agua || 0) * c.copoMl);
+  const contados = ml.filter((_, i) => dias[i] >= ini);
+  const r = Pilares.resumoAgua(contados, c.aguaMeta);
+  const topo = Math.max(c.aguaMeta * 1.3, r.maximo, 1), H = 80, W = 300, bw = 8;
+  const barras = ml.map((x, i) => {
+    const h = Math.max(x > 0 ? 1.5 : 0, x / topo * H), noMes = dias[i] >= ini;
+    return `<rect x="${i * 10}" y="${(H - h).toFixed(1)}" width="${bw}" height="${h.toFixed(1)}" fill="var(--frio)"${x >= c.aguaMeta && noMes ? '' : ' opacity=".45"'}/>`;
+  }).join('');
+  const yMeta = (H - c.aguaMeta / topo * H).toFixed(1);
+  const L = x => br((x / 1000).toFixed(1));
+  const resumo = `Água nos últimos 30 dias: média de ${L(r.media)} L por dia, meta de ${L(c.aguaMeta)} L batida em ${r.naMeta} de ${r.dias} ${r.dias === 1 ? 'dia' : 'dias'}.`;
+  return `<div class="bloco"><div class="bloco-tit"><span>Água — 30 dias</span><b>${L(r.media)} L/dia</b></div>
+    <svg viewBox="0 0 ${W} ${H + 2}" class="graf-agua" role="img" aria-label="${esc(resumo)}">
+      <line x1="0" x2="${W}" y1="${yMeta}" y2="${yMeta}" stroke="var(--tinta2)" stroke-width="1" stroke-dasharray="4 3"/>${barras}</svg>
+    <div class="legenda"><span><i style="background:var(--frio);height:9px"></i>meta batida</span><span><i style="background:var(--frio);opacity:.45;height:9px"></i>abaixo da meta</span>
+      <span>linha tracejada = ${L(c.aguaMeta)} L</span></div>
+    <p class="nota">${esc(resumo)} Hoje entra parcial.</p></div>`;
+}
+
 function pintarProgresso() {
   const c = E.cfg, ps = ordPesos(), at = pesoAtual();
   const delta = at-c.pesoInicial, imc = at/Math.pow(c.altura/100,2);
@@ -1744,7 +2242,7 @@ function pintarProgresso() {
   h += `<div class="bloco"><div class="bloco-tit"><span>Peso</span><b>${ps.length} registros</b></div>
     <div class="kpi-num" style="font-size:42px">${br(tend.toFixed(1))}<small> kg</small></div>
     <div class="kpi-rot">Tendência · balança de hoje marcou ${br(at.toFixed(1))} kg</div>
-    <div style="font-family:var(--mono);font-size:13px;color:${delta<0?'var(--sinal)':delta>0?'var(--oxido)':'var(--tinta2)'}">
+    <div style="font-family:var(--mono);font-size:13px;color:${(c.fasePlano==='ganho' ? delta>0 : delta<0)?'var(--sinal)':delta!==0?'var(--oxido)':'var(--tinta2)'}">
       ${delta===0?'sem variação registrada':(delta<0?'▼ ':'▲ ')+br(Math.abs(delta).toFixed(1))+' kg desde o início'}</div>
     <div class="grade2" style="margin-top:12px">
       <label class="campo"><span>Peso (kg)</span><input type="number" id="in-peso" step="0.1" inputmode="decimal" placeholder="${br(at.toFixed(1))}"></label>
@@ -1791,8 +2289,9 @@ function pintarProgresso() {
 
   /* Quem escolheu manter peso tem meta igual ao peso inicial: a divisão seria 0/0
      ("NaN%"). Sem distância a percorrer, o indicador mostra um traço. */
-  const trecho = c.pesoInicial - c.pesoMeta;
-  const doCaminho = trecho > 0.05 ? Math.round(Math.max(0, Math.min(100, ((c.pesoInicial-at)/trecho)*100))) : null;
+  // vale para perda (meta abaixo do início) e para ganho (meta acima): progresso = andou / total
+  const trecho = c.pesoMeta - c.pesoInicial;
+  const doCaminho = Math.abs(trecho) > 0.05 ? Math.round(Math.max(0, Math.min(100, ((at - c.pesoInicial)/trecho)*100))) : null;
   h += `<div class="grade3">
     <div class="bloco"><div class="kpi-num">${br((at-c.pesoMeta).toFixed(1))}</div><div class="kpi-rot">Até a meta</div></div>
     <div class="bloco"><div class="kpi-num">${br(imc.toFixed(1))}</div><div class="kpi-rot">${esc(classificar(imc,REF.imc))}</div></div>
@@ -1801,19 +2300,26 @@ function pintarProgresso() {
   if (ps.length>=2) {
     const falta = at-c.pesoMeta;
     // meta já atingida (falta <= 0) não tem projeção: sem esta guarda saía "meta em ~-3 semanas"
-    const sems = r && r.kgSem<-0.05 && falta > 0 ? Math.round(falta/Math.abs(r.kgSem)) : null;
-    const dentro = r && r.pct>=REF.ritmoMin && r.pct<=REF.ritmoMax && r.kgSem<0;
+    const ganhando = c.fasePlano === 'ganho';
+    // perda: faltam kg para baixo; ganho: faltam kg para cima (falta negativa)
+    const sems = ganhando
+      ? (r && r.kgSem > 0.03 && falta < 0 ? Math.round(-falta/r.kgSem) : null)
+      : (r && r.kgSem<-0.05 && falta > 0 ? Math.round(falta/Math.abs(r.kgSem)) : null);
+    const rg = ganhando && r ? avaliarRitmoGanho(r.kgSem, at) : null;
+    const dentro = ganhando ? !!(rg && rg.nivel === 'ideal') : r && r.pct>=REF.ritmoMin && r.pct<=REF.ritmoMax && r.kgSem<0;
     h += `<div class="bloco"><div class="bloco-tit"><span>Ritmo</span>
       <b class="${r?(dentro?'sobe':'desce'):''}">${r?br(r.kgSem.toFixed(2))+' kg/sem':'—'}</b></div>
       ${grafLinha(serieT.map(p=>({v:p.tend,d:p.d})), { alvo:c.pesoMeta, rot:'Peso-tendência' })}
       <div class="legenda"><span><i style="background:var(--frio)"></i>tendência</span>
         <span><i style="background:var(--oxido)"></i>média de 3</span>
         <span><i style="background:var(--sinal)"></i>meta ${br((+c.pesoMeta).toFixed(1))} kg</span></div>
-      ${r?`<p class="nota">${br((r.pct*100).toFixed(2))}% do peso corporal por semana.
+      ${r && ganhando ? `<p class="nota">${br((r.pct*100).toFixed(2))}% do peso corporal por semana.
+        ${esc(rg.txt)}${sems ? ' Nesse ritmo, meta em ~' + sems + ' semanas.' : ''}</p>`
+      : r?`<p class="nota">${br((r.pct*100).toFixed(2))}% do peso corporal por semana.
         Faixa que preserva massa magra: 0,5% a 1,0%.
         ${dentro?'Você está dentro dela.':r.kgSem>=0?'Sem perda no período.':r.pct>REF.ritmoMax?'Rápido demais — risco de perder massa magra.':'Lento demais para o déficit planejado.'}
         ${sems?' Nesse ritmo, meta em ~'+sems+' semanas.':''}</p>`
-        :'<p class="nota">Duas pesagens com pelo menos 7 dias de intervalo para calcular o ritmo.</p>'}</div>`;
+        :`<p class="nota">Duas pesagens com pelo menos ${ganhando ? 14 : 7} dias de intervalo para calcular o ritmo.</p>`}</div>`;
   }
 
   h += `<div class="bloco"><div class="bloco-tit"><span>Fotos de progresso</span>
@@ -1827,6 +2333,9 @@ function pintarProgresso() {
         <div style="text-align:right">${x.kcalAntes} → ${x.kcalDepois}<br><span style="color:var(--tinta2)">${br((x.ritmoPct*100).toFixed(2))}%/sem</span></div></div>`).join('')
       + '</div>';
   }
+
+  h += blocoAdesaoPilares();
+  h += blocoAguaMes();
 
   h += '<div class="bloco"><div class="bloco-tit"><span>Aderência — 28 dias</span></div>';
   h += '<div class="cal-dias">'+['D','S','T','Q','Q','S','S'].map(x=>'<span>'+x+'</span>').join('')+'</div><div class="cal">';
@@ -1850,6 +2359,37 @@ function pintarProgresso() {
 let urlsGaleria = [];
 const urlFoto = blob => { const u = URL.createObjectURL(blob); urlsGaleria.push(u); return u; };
 
+/* Duas fotos lado a lado. A mais antiga é sempre o "antes". As fotos só são lidas do aparelho. */
+async function abrirComparacao() {
+  let fotos;
+  try { fotos = await FotoDB.listar('progresso'); } catch (e) { toast('Não foi possível abrir o álbum.'); return; }
+  if (fotos.length < 2) { toast('Precisa de pelo menos duas fotos.'); return; }
+  let ia = 0, ib = fotos.length - 1;
+  const rot = f => fmtData(f.data) + (f.peso ? ' · ' + br(f.peso) + ' kg' : '');
+  const opcoes = sel => fotos.map((f, i) => `<option value="${i}"${i === sel ? ' selected' : ''}>${esc(rot(f))}</option>`).join('');
+  const corpo = () => {
+    const r = compararFotos(fotos[ia], fotos[ib]);
+    if (r.erro) return `<p class="nota" role="alert" style="color:var(--oxido)">${esc(r.erro)}</p>`;
+    const fig = (f, tit) => `<figure><figcaption><b>${tit}</b><br>${esc(rot(f))}</figcaption>
+      <img alt="Foto de ${fmtData(f.data)}" src="${urlFoto(f.blob)}"></figure>`;
+    const dif = [r.dias != null ? r.dias + (r.dias === 1 ? ' dia' : ' dias') + ' entre as fotos' : '',
+      r.kg != null ? (r.kg > 0 ? '+' : r.kg < 0 ? '−' : '') + br(Math.abs(r.kg).toFixed(1)) + ' kg no período' : ''].filter(Boolean).join(' · ');
+    return `<div class="comparar">${fig(r.antes, 'Antes')}${fig(r.depois, 'Depois')}</div>
+      <p class="nota">${esc(dif)}${dif ? '. ' : ''}Compare com a mesma luz, distância e pose: a balança sozinha não conta tudo.</p>`;
+  };
+  abrirGaveta('Comparar fotos', `
+    <div class="linha-flex">
+      <label class="campo" style="flex:1"><span>Foto 1</span><select id="cmp-a">${opcoes(ia)}</select></label>
+      <label class="campo" style="flex:1"><span>Foto 2</span><select id="cmp-b">${opcoes(ib)}</select></label></div>
+    <div id="cmp-corpo">${corpo()}</div>`);
+  $('#gaveta-corpo').addEventListener('change', ev => {
+    if (ev.target.id === 'cmp-a') ia = +ev.target.value;
+    else if (ev.target.id === 'cmp-b') ib = +ev.target.value;
+    else return;
+    $('#cmp-corpo').innerHTML = corpo();
+  });
+}
+
 function carregarGaleria() {
   const alvo = $('#galeria');
   if (!alvo) return;
@@ -1862,6 +2402,7 @@ function carregarGaleria() {
       <img alt="Foto de ${fmtData(f.data)}" src="${urlFoto(f.blob)}">
       <figcaption>${fmtData(f.data)}${f.peso?' · '+br(f.peso)+' kg':''}</figcaption></figure>`).join('')}</div>
       ${fotos.length>2?`<p class="nota">Mostrando a primeira e a mais recente de ${fotos.length}.</p>`:''}
+      ${fotos.length>1?'<button type="button" class="btn vazado mini" id="cmp-fotos" style="margin:8px 0">Comparar duas fotos</button>':''}
       <div class="tiras">${fotos.map(f=>`<button type="button" class="tira" data-verfoto="${f.id}">
         <img alt="" src="${urlFoto(f.blob)}"><span>${String(f.data).slice(5)}</span></button>`).join('')}</div>`;
   }).catch(() => { alvo.innerHTML = '<div class="vazio">Não foi possível abrir o álbum neste navegador.</div>'; });
@@ -1959,6 +2500,16 @@ function pintarAnalise() {
 
   const sete = [];
   for (let i=6;i>=0;i--){ const dd=new Date(); dd.setDate(dd.getDate()-i); sete.push(iso(dd)); }
+  const tr = tendenciaRecuperacao(E, HOJE, 14);
+  if (tr) {
+    const lt = leituraTendencia(tr);
+    h += `<div class="bloco"><div class="bloco-tit"><span>Recuperação — 14 dias</span><b>${tr.dias} check-ins</b></div>
+      <div class="grade3">
+        <div><div class="kpi-num">${tr.sono == null ? '—' : br(tr.sono.toFixed(1))}<small>h</small></div><div class="kpi-rot">Sono médio</div></div>
+        <div><div class="kpi-num">${tr.energia == null ? '—' : br(tr.energia.toFixed(1))}<small>/5</small></div><div class="kpi-rot">Energia</div></div>
+        <div><div class="kpi-num">${tr.estresse == null ? '—' : br(tr.estresse.toFixed(1))}<small>/5</small></div><div class="kpi-rot">Estresse</div></div></div>
+      ${lt ? `<p class="nota">${esc(lt)}</p>` : '<p class="nota">Com mais check-ins, o app passa a apontar padrões entre sono, fome e treino.</p>'}</div>`;
+  }
   const sinds = sindromes(achados, { fase: faseAtual(), orfaos: gruposOrfaos(seriesPorGrupo(E.sessoes, sete)) });
   if (sinds.length) {
     h += `<div class="bloco-tit" style="margin:4px 0 8px"><span>Padrões cruzados</span>
@@ -1975,7 +2526,7 @@ function pintarAnalise() {
   }
 
   h += `<div class="bloco"><div class="bloco-tit"><span>Perguntas frequentes</span></div>
-    ${PERGUNTAS.map((p,i)=>`<button type="button" class="pergunta" data-perg="${i}">${esc(p.q)}</button>`).join('')}</div>`;
+    ${PERGUNTAS.map((p,i)=>perguntaDaFase(p, E.cfg.fasePlano) ? `<button type="button" class="pergunta" data-perg="${i}">${esc(p.q)}</button>` : '').join('')}</div>`;
 
   h += `<div class="bloco assist-bloco"><div class="bloco-tit"><span>${esc(E.cfg.iaNome||'Assistente')}</span>
       <b>${SABER.length + (E.saberProprio||[]).length} tópicos</b></div>
@@ -2410,6 +2961,14 @@ function executarAcao(r, A, C, render) {
     return;
   }
 
+  if (r.tipo === 'checkin') {
+    E.checkins[HOJE] = Object.assign({}, E.checkins[HOJE], r.campos);
+    gravar(); pintarHoje(); pintarTreino();
+    const av = avaliarRecuperacao(E.checkins[HOJE]);
+    chatHist.push({ r:'ia', t: 'Anotei no seu check-in de hoje. ' + av.sugestao });
+    return;
+  }
+
   if (r.tipo === 'registrar-peso') {
     // gravar peso apaga cintura/gordura do dia e recalcula a meta: pede confirmação como qualquer ação que grava
     const res = agenteExecutar('registrar_peso', { kg: r.kg }, false);
@@ -2462,7 +3021,7 @@ function htmlPreview() {
   return `<div class="prev">
     <div class="prev-tit">Entendi isto — confira antes de gravar</div>
     ${pendente.itens.map((i,ix)=>`<div class="prev-item">
-      <span class="prev-nome"><b>${esc(i.nome)}</b><small>você disse: "${esc(i.dito)}"</small>${i.aviso ? `<small class="prev-aviso">${esc(i.aviso)}</small>` : ''}</span>
+      <span class="prev-nome"><b>${esc(i.nome)}</b><small>você disse: "${esc(i.dito)}"</small>${i.aviso ? `<small class="prev-aviso">${esc(i.aviso)}</small>` : ''}${i.alimento && (E.cfg.restricoes||[]).length && avisosDoAlimento(i.alimento, E.cfg.restricoes).length ? `<small class="prev-aviso">Atenção: ${esc(avisosDoAlimento(i.alimento, E.cfg.restricoes).join(' · '))}</small>` : ''}</span>
       <input type="number" value="${i.gramas}" data-prevg="${ix}" inputmode="numeric" aria-label="Gramas de ${esc(i.nome)}">
       <span class="fr-un">g</span>
       <button type="button" class="item-x" data-prevrm="${ix}" aria-label="Remover">×</button></div>`).join('')}
@@ -2534,8 +3093,10 @@ function abrirChat() {
       : m.t === '__CONFIRMA__' ? `<div class="msg ia sem-bolha">${htmlConfirma()}</div>`
       : `<div class="msg ${m.r}">${fmtMd(m.t)}</div>`).join('');
     l.scrollTop = l.scrollHeight; };
+  // o HTML inicial não sabe desenhar prévia e confirmação pendentes: desenha pelo render completo
+  if (chatHist.length) render();
 
-  let ocupado = false;           // true enquanto um provedor de IA está respondendo
+  let ocupado = false;          // true enquanto um provedor de IA está respondendo
   const enviar = async (texto) => {
     const el = $('#chat-in');
     // 500 caracteres cobrem qualquer pergunta ou refeição; texto colado maior custaria segundos de processamento
@@ -2800,9 +3361,13 @@ function baixarModelo(id) {
 
 
 /* ══ CARDÁPIO E LISTA DE COMPRAS ══════════════════════ */
+/* Base sem o que as restrições alimentares da pessoa excluem. Só para SUGERIR (cardápio, trocas):
+   o diário e a busca continuam enxergando tudo, e a busca avisa o que contém. */
+const baseFiltrada = () => filtrarBase(baseCompleta(), E.cfg.restricoes || []);
+
 function opcoesCardapio() {
   return {
-    base: baseCompleta(), modo: E.cfg.modoCardapio,
+    base: baseFiltrada(), modo: E.cfg.modoCardapio,
     preferir: E.recentes.slice(0,12), favoritos: E.favoritos,
     evitar: E.cfg.evitarAlimentos || []
   };
@@ -2881,7 +3446,7 @@ function pintarPlano() {
   const dsem = (E.cfg.diasTreino || []).slice().sort((a,b)=>a-b);
   const Ls = letras();
   h += `<div class="bloco"><div class="bloco-tit"><span>Sua divisão de treino</span><b>${dsem.length} dias</b></div>
-    <p style="font-size:13px;margin:0 0 8px"><b>${esc(((PC.SPLITS[c.splitId]||{}).nome) || 'Personalizada')}</b> · ${esc(c.nivel === 'intermediario' ? 'já treina' : 'iniciante')} · objetivo: ${esc(c.objetivo === 'manter' ? 'manter e ganhar força' : 'emagrecer')}</p>
+    <p style="font-size:13px;margin:0 0 8px"><b>${esc(((PC.SPLITS[c.splitId]||{}).nome) || 'Personalizada')}</b> · ${esc(c.nivel === 'intermediario' ? 'já treina' : 'iniciante')} · objetivo: ${esc(c.objetivo === 'manter' ? 'manter e ganhar força' : c.objetivo === 'ganhar' ? 'ganhar massa' : 'emagrecer')}</p>
     <div class="linha-flex" style="gap:5px;margin-bottom:9px">${[0,1,2,3,4,5,6].map(d => {
       const i = dsem.indexOf(d);
       return `<div style="flex:1;text-align:center;border:1px solid ${i>=0?'var(--sinal)':'var(--linha)'};padding:5px 0 4px;font-family:var(--mono);font-size:10.5px;color:var(--tinta2)"><b style="display:block;font-family:var(--disp);font-size:15px;color:${i>=0?'var(--sinal)':'var(--tinta2)'}">${i>=0 ? Ls[i % Ls.length] : '·'}</b>${SEM[d]}</div>`;
@@ -2894,7 +3459,7 @@ function pintarPlano() {
       <div><div class="kpi-num">${c.prot}<small>g</small></div><div class="kpi-rot">Proteína</div></div>
       <div><div class="kpi-num">${c.carb}<small>g</small></div><div class="kpi-rot">Carbo</div></div>
       <div><div class="kpi-num">${c.gord}<small>g</small></div><div class="kpi-rot">Gordura</div></div></div>
-    <p class="nota">Gasto estimado ${m.tdee} kcal (basal ${m.tmb} × atividade ${br(c.atividade)}), déficit de ${c.deficit}.
+    <p class="nota">Gasto estimado ${m.tdee} kcal (basal ${m.tmb} × atividade ${br(c.atividade)}), ${c.deficit < 0 ? 'superávit de ' + Math.abs(c.deficit) : 'déficit de ' + c.deficit}.
     Proteína calculada sobre peso ajustado de ${m.ajust} kg — usar o peso atual inflaria o alvo sem benefício.</p></div>`;
 
   h += blocoCardapio();
@@ -2905,7 +3470,7 @@ function pintarPlano() {
       <div style="text-align:right;white-space:nowrap">${f.series}×${f.repMin}–${f.repMax}<br>
       <span style="color:var(--tinta2)">RIR ${f.rirAlvo}${f.fatorCarga<1?' · '+Math.round(f.fatorCarga*100)+'%':''}</span></div></div>`).join('')
     + `<p class="nota">Ao fim da semana 12 um novo ciclo começa, mantendo as cargas conquistadas.
-      Em déficit, volume alto é o primeiro a comprometer recuperação — por isso o ciclo controla volume e preserva intensidade.</p>
+      Volume alto demais é o primeiro a comprometer a recuperação, principalmente em déficit — por isso o ciclo controla volume e preserva intensidade.</p>
       <button type="button" class="btn vazado mini" id="reiniciar-ciclo" style="margin-top:8px">Reiniciar ciclo hoje</button></div>`;
 
   letras().concat(['K']).forEach(k => {
@@ -2957,7 +3522,7 @@ function registrarDoCardapio(ref, silencioso) {
 function abrirTrocaCardapio(ref, ix) {
   const item = E.cardapio.refs[ref][ix];
   // o 4º argumento tira da lista de trocas o que a pessoa pediu para evitar
-  const alt = substituirPorFuncao(item, baseCompleta(), E.cfg.modoCardapio, E.cfg.evitarAlimentos || []);
+  const alt = substituirPorFuncao(item, baseFiltrada(), E.cfg.modoCardapio, E.cfg.evitarAlimentos || []);
   const FN = { proteina:'fonte de proteína', carboidrato:'fonte de carboidrato',
                gordura:'fonte de gordura', vegetal:'vegetal', fruta:'fruta',
                laticinio:'laticínio', bebida:'bebida', misto:'item' };
@@ -3023,8 +3588,11 @@ function pintarAjustes() {
       <option value="0"${!c.notifAtivo?' selected':''}>Não</option></select></label>
     ${notifLista()}
     <button type="button" class="btn vazado mini" id="add-notif" style="margin-top:8px">+ novo lembrete</button>
-    <p class="nota">App web só dispara lembrete com o app aberto ou em segundo plano recente.
-    Mantenha em paralelo os alarmes nativos do Android para os horários fixos.</p></div>`;
+    <button type="button" class="btn vazado mini" id="ics-baixar" style="margin-top:7px">Levar para o calendário do celular (.ics)</button>
+    <p class="nota">Um app instalado pela internet só mostra lembrete enquanto está aberto ou acabou de ser usado:
+    sem servidor, nenhum navegador entrega aviso com o app fechado. O calendário do celular entrega. O botão acima
+    gera um arquivo com todos os lembretes acima (cada um com alarme na hora certa); abra-o no celular e escolha
+    "Adicionar ao calendário". Se mudar os lembretes, gere o arquivo de novo.</p></div>`;
 
   const mem = (E.memoria.fatos||[]);
   const obsv = mem.filter(x => x.origem === 'observado');
@@ -3086,6 +3654,13 @@ function pintarAjustes() {
     <input type="file" id="arq-saber" accept="application/json" class="oculto">
     <p class="nota">Nenhuma chave de API, nenhum servidor, nenhum custo. Todo o conhecimento roda neste
     aparelho e funciona offline.</p></div>`;
+
+  h += `<div class="bloco"><div class="bloco-tit"><span>Restrições alimentares</span><b>${(c.restricoes||[]).length ? (c.restricoes||[]).length + ' ativa' + ((c.restricoes||[]).length > 1 ? 's' : '') : 'nenhuma'}</b></div>
+    <p class="nota" style="margin:0 0 8px">O cardápio e as trocas passam a escolher só alimentos compatíveis. Na busca e no registro, o app avisa
+    quando um alimento viola alguma restrição marcada.</p>
+    <div class="chips" style="flex-wrap:wrap">${RESTRICOES.map(r => `<button type="button" class="chip" data-rest="${r.id}" title="${esc(r.desc)}"
+      aria-pressed="${(c.restricoes||[]).includes(r.id)}">${esc(r.rot)}</button>`).join('')}</div>
+    <div class="alerta ocre" style="margin-top:10px"><div class="alerta-tit">Leia isto</div><p>${esc(AVISO_RESTRICOES)}</p></div></div>`;
 
   const pv = IA_PROVEDORES[c.iaProv] || IA_PROVEDORES.gemini;
   const temChaveIA = !!IAChave.ler(c.iaProv);
@@ -3158,12 +3733,14 @@ function pintarAjustes() {
       <option value="1.35"${c.atividade==1.35?' selected':''}>Leve — treino 3x + caminhada</option>
       <option value="1.5"${c.atividade==1.5?' selected':''}>Moderado — treino 4–5x</option>
       <option value="1.65"${c.atividade==1.65?' selected':''}>Intenso</option></select></label>
-    <label class="campo"><span>Déficit diário</span><select id="cfg-def">
+    ${c.fasePlano === 'ganho'
+      ? `<p class="nota" style="margin:0 0 9px">Fase de ganho de massa: superávit de ${Math.abs(c.deficit)} kcal por dia, calculado pelo seu perfil e pelo gasto medido.</p>`
+      : `<label class="campo"><span>Déficit diário</span><select id="cfg-def">
       ${[0,400,600,800].some(v => v == c.deficit) ? '' : `<option value="${c.deficit}" selected>${c.deficit} kcal — calculado pelo seu perfil</option>`}
       ${c.fasePlano !== 'perda' ? `<option value="0"${c.deficit==0?' selected':''}>0 kcal — manutenção</option>` : ''}
       <option value="400"${c.deficit==400?' selected':''}>400 kcal — lento</option>
       <option value="600"${c.deficit==600?' selected':''}>600 kcal — recomendado</option>
-      <option value="800"${c.deficit==800?' selected':''}>800 kcal — agressivo</option></select></label>
+      <option value="800"${c.deficit==800?' selected':''}>800 kcal — agressivo</option></select></label>`}
     <label class="campo"><span>Recalcular metas conforme o peso cai</span><select id="cfg-auto">
       <option value="1"${c.autoRecalc?' selected':''}>Sim</option>
       <option value="0"${!c.autoRecalc?' selected':''}>Não, fixas</option></select></label>
@@ -3180,6 +3757,13 @@ function pintarAjustes() {
     <button type="button" class="btn vazado" id="salvar-metas">Salvar metas manuais</button></div>`;
 
   h += `<div class="bloco"><div class="bloco-tit"><span>Backup e exportação</span><b id="uso-disco">—</b></div>
+    <button type="button" class="btn mini" id="bk-compartilhar" style="margin-bottom:7px">Salvar backup agora (compartilhar ou baixar)</button>
+    <p class="nota" style="margin:0 0 9px">${c.ultimoBackup ? 'Último backup: ' + fmtData(c.ultimoBackup) + '.' : 'Você ainda não salvou nenhum backup.'}
+    Mande o arquivo para o seu Drive ou e-mail: é a única proteção contra perder o celular ou limpar o navegador.</p>
+    <div class="bloco-tit" style="margin:4px 0 6px"><span>Cópias automáticas neste aparelho</span></div>
+    <div id="copias-lista"><div class="vazio">Carregando…</div></div>
+    <p class="nota">O app guarda uma cópia por dia (as 7 mais recentes), feita quando você abre o app. Protege de erro e de dado corrompido;
+    não protege de apagar os dados do navegador, por isso o backup em arquivo acima.</p>
     <button type="button" class="btn vazado mini" id="exp-json" style="margin-bottom:7px">Backup completo (JSON)</button>
     <button type="button" class="btn vazado mini" id="exp-csv-dieta" style="margin-bottom:7px">Diário alimentar (CSV)</button>
     <button type="button" class="btn vazado mini" id="exp-csv-treino" style="margin-bottom:7px">Treinos com RIR e 1RM (CSV)</button>
@@ -3204,6 +3788,12 @@ function pintarAjustes() {
     const el = $('#uso-disco');
     if (el && t) el.textContent = (t.uso/1048576).toFixed(1)+' MB';
   }).catch(()=>{});
+  CopiasDB.listar().then(l => {
+    const el = $('#copias-lista'); if (!el) return;
+    el.innerHTML = l.length ? l.map(x => `<div class="hist"><div class="hist-esq"><b>${fmtData(x.d)}</b>${Math.round(x.tam/1024)} KB · estado ao abrir o app</div>
+      <button type="button" class="btn vazado mini" style="width:auto" data-restaurar="${esc(x.d)}">Restaurar</button></div>`).join('')
+      : '<div class="vazio">A primeira cópia é feita na próxima vez que você abrir o app.</div>';
+  }).catch(() => { const el = $('#copias-lista'); if (el) el.innerHTML = '<div class="vazio">Este navegador não permite guardar cópias automáticas.</div>'; });
 }
 
 /* ══ NOTIFICAÇÕES ═════════════════════════════════════ */
@@ -3358,6 +3948,11 @@ function ligarEventos() {
     if (v===0) pararCron(); else { cronFim += v*1000; tickCron(); }
   });
 
+  $('#arq-prato').addEventListener('change', e => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (f) fotoDoPrato(f);
+  });
+
   $('#arq-progresso').addEventListener('change', async e => {
     const f = e.target.files[0]; e.target.value = '';
     if (!f) return;
@@ -3366,6 +3961,16 @@ function ligarEventos() {
       await FotoDB.salvar({ id:'p'+Date.now(), data:HOJE, tipo:'progresso', blob, peso:pesoAtual() });
       toast('Foto salva'); carregarGaleria();
     } catch (err) { toast(err && err.cota ? err.message : 'Não foi possível salvar a foto.', 5000); }
+  });
+
+  /* Abas do treino: setas esquerda/direita trocam de aba, Home e End vão às pontas. */
+  document.body.addEventListener('keydown', e => {
+    const aba = e.target.closest && e.target.closest('[role=tab][data-aba]');
+    if (!aba || !['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+    const abas = $$('[role=tab][data-aba]'), i = abas.indexOf(aba);
+    const j = e.key === 'Home' ? 0 : e.key === 'End' ? abas.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + abas.length) % abas.length;
+    e.preventDefault(); trAba = abas[j].dataset.aba; pintarTreino();
+    const novo = $('#aba-' + trAba); if (novo) novo.focus();
   });
 
   document.body.addEventListener('click', async e => {
@@ -3383,6 +3988,19 @@ function ligarEventos() {
       if (i >= 0) lista.splice(i,1); else lista.push(id);
       if (id === 'agua' && i < 0) { dia().agua = Math.ceil(E.cfg.aguaMeta/E.cfg.copoMl); }
       gravar(); pintarHoje(); pintarTopo(); vibrar(15); return;
+    }
+    if ((b = t.closest('[data-sup]')))       { Pilares.alternar(E, HOJE, b.dataset.sup); gravar(); pintarHoje(); pintarTopo(); vibrar(15); return; }
+    if ((b = t.closest('[data-tl]')))        { tlFiltro = b.dataset.tl; pintarHoje(); return; }
+    if (t.closest('#sup-gerir'))             return abrirSuplementos();
+    if ((b = t.closest('[data-sup-rm]'))) {
+      const x = Pilares.doDia(E, HOJE).find(s => s.id === b.dataset.supRm);
+      if (!x || !confirm('Remover ' + x.nome + '? O histórico de "tomei" dele também sai.')) return;
+      Pilares.remover(E, x.id); gravar(); pintarHoje(); pintarTopo(); abrirSuplementos(); return;
+    }
+    if (t.closest('#sup-add')) {
+      const r = Pilares.adicionar(E, $('#sup-nome').value, $('#sup-hora').value, $('#sup-dose').value);
+      if (r.erro) return abrirSuplementos(r.erro);
+      gravar(); pintarHoje(); pintarTopo(); abrirSuplementos(); toast(r.nome + ' adicionado'); return;
     }
     if ((b = t.closest('[data-causa]'))) {
       const [tid, causa] = b.dataset.causa.split('|');   // id de tarefa contém ':' (ex.: ref:cafe)
@@ -3406,6 +4024,8 @@ function ligarEventos() {
     }
     if (t.id==='ler-codigo') { refAlvo = 'almoco'; return abrirScanner(); }
     if (t.id==='add-foto')      { $('#arq-progresso').click(); return; }
+    if (t.closest('#foto-prato')) { $('#arq-prato').click(); return; }
+    if (t.id==='fp-ajustes')    { fecharGaveta(); irPara('ajustes'); return; }
     if (t.id==='add-cardio')    return abrirCardio();
     if (t.id==='btn-passos')    {
       const n = Math.round(+$('#in-passos').value);
@@ -3427,6 +4047,63 @@ function ligarEventos() {
       gravar(); pintarTopo(); pintarHoje(); toast('Dia de ontem copiado'); return;
     }
     if (t.id==='ir-pesagem') return irPara('progresso');
+
+    if ((b = t.closest('[data-rest]'))) {
+      const id = b.dataset.rest, l = E.cfg.restricoes || [];
+      E.cfg.restricoes = l.includes(id) ? l.filter(x => x !== id) : l.concat(id);
+      E.cardapio = null;                         // o cardápio de hoje pode conter o que acabou de ser excluído
+      gravar(); pintarAjustes(); toast(E.cfg.restricoes.includes(id) ? 'Restrição ligada. O cardápio será refeito.' : 'Restrição desligada.');
+      return;
+    }
+
+    /* ── hábitos, backup e lembretes ── */
+    if (t.id==='bk-agora' || t.id==='bk-compartilhar') { salvarBackupAgora(); return; }
+    if (t.id==='bk-depois') { E.cfg.backupAdiado = HOJE; gravar(); pintarHoje(); return; }
+    if ((b = t.closest('[data-ci]'))) {
+      const [campo, val] = b.dataset.ci.split(':'); ciRascunho[campo] = +val;
+      // só marca o botão tocado: repintar a tela inteira jogava o foco de volta ao topo (teclado e leitor de tela)
+      $$('[data-ci^="' + campo + ':"]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      const salvar = $('#ci-salvar'); if (salvar) salvar.disabled = false;
+      return;
+    }
+    if (t.id==='ci-salvar') {
+      if (!Object.keys(ciRascunho).length) return;
+      E.checkins[HOJE] = Object.assign({}, ciRascunho);
+      // se a recuperação de hoje ficou boa, a "versão leve" pedida antes não vale mais
+      if (avaliarRecuperacao(E.checkins[HOJE]).nivel === 'boa' && E.treinoLeve === HOJE) E.treinoLeve = null;
+      // guarda 120 dias: o histórico serve para a tendência da semana, não para ocupar espaço
+      Object.keys(E.checkins).filter(k => diasEntre(k, HOJE) > 120).forEach(k => delete E.checkins[k]);
+      ciRascunho = {}; ciRefazendo = false; gravar(); pintarHoje(); pintarTreino(); toast('Check-in salvo.');
+      return;
+    }
+    if (t.id==='ci-refazer') { ciRascunho = Object.assign({}, E.checkins[HOJE]); ciRefazendo = true; pintarHoje(); return; }
+    if (t.id==='ver-conquistas') return abrirConquistas();
+    if (t.id==='ver-semana') return abrirSemana();
+    if (t.id==='rel-pdf') { fecharGaveta(); imprimirRelatorio(); return; }
+    if (t.id==='rel-enviar') {
+      const txt = textoRelatorioSemanal(resumoSemanal(E, HOJE), ctxRelatorio());
+      try {
+        if (navigator.share) await navigator.share({ title: 'Minha semana no Controle', text: txt });
+        else if (navigator.clipboard) { await navigator.clipboard.writeText(txt); toast('Resumo copiado.'); }
+        else toast('Este navegador não permite compartilhar. Use "Salvar como PDF".', 4200);
+      } catch (err) { /* a pessoa fechou o menu de compartilhar */ }
+      return;
+    }
+    if (t.id==='ics-baixar') {
+      const r = gerarICS(E.cfg.notif, HOJE);
+      if (!r.eventos) { toast('Nenhum lembrete válido para levar ao calendário.', 3600); return; }
+      const res = await compartilharArquivo('lembretes-controle.ics', r.texto, 'text/calendar', 'Lembretes do Controle');
+      if (res !== 'cancelado') toast(res === 'baixado' ? 'Arquivo baixado. Abra-o no celular e escolha "Adicionar ao calendário".' : 'Escolha o app de Calendário para adicionar.', 5600);
+      return;
+    }
+    if ((b = t.closest('[data-restaurar]'))) {
+      const dia0 = b.dataset.restaurar;
+      let cop = null; try { cop = await CopiasDB.obter(dia0); } catch (err) {}
+      if (!cop) { toast('Não encontrei essa cópia.'); return; }
+      substituirDados(cop.json, 'a cópia de ' + fmtData(dia0));
+      return;
+    }
+    if (t.id==='tr-leve') { E.treinoLeve = HOJE; gravar(); pintarTreino(); toast('Treino de hoje em versão leve.'); return; }
 
     if ((b = t.closest('[data-reav]'))) {
       const rv = reavaliacaoDevida();
@@ -3472,6 +4149,20 @@ function ligarEventos() {
       fecharGaveta(); carregarGaleria(); return;
     }
 
+    if ((b = t.closest('[data-aba]')))       { trAba = b.dataset.aba; pintarTreino(); return; }
+    if ((b = t.closest('[data-treino-pdf]'))) {
+      if (!E.rotinas[b.dataset.treinoPdf]) return;
+      imprimirHtml(htmlTreino(dadosDoTreino(b.dataset.treinoPdf))); return;
+    }
+    if ((b = t.closest('[data-treino-env]'))) {
+      if (!E.rotinas[b.dataset.treinoEnv]) return;
+      const d = dadosDoTreino(b.dataset.treinoEnv);
+      const r = await compartilharTexto(d.titulo, textoTreino(d));
+      if (r === 'copiado') toast('Treino copiado. Cole onde quiser enviar.', 3600);
+      else if (r === 'indisponivel') toast('Este navegador não permite compartilhar. Use "Salvar em PDF".', 4200);
+      return;
+    }
+    if (t.id === 'cmp-fotos') return abrirComparacao();
     if ((b = t.closest('[data-iniciar]'))) return iniciarSessao(b.dataset.iniciar);
     if ((b = t.closest('[data-ok]'))) {
       const [ei,si] = b.dataset.ok.split(':').map(Number);
@@ -3701,6 +4392,8 @@ function ligarEventos() {
       if (!(altura >= PC.ALTURA_VALIDA.min && altura <= PC.ALTURA_VALIDA.max)) { toast('Altura: informe entre ' + PC.ALTURA_VALIDA.min + ' e ' + PC.ALTURA_VALIDA.max + ' cm.', 4000); return; }
       if (!(pini >= PESO_MIN && pini <= PESO_MAX)) { toast('Peso inicial: informe entre ' + PESO_MIN + ' e ' + PESO_MAX + ' kg.', 4000); return; }
       if (!(pmeta >= PESO_MIN && pmeta <= PESO_MAX)) { toast('Peso meta: informe entre ' + PESO_MIN + ' e ' + PESO_MAX + ' kg.', 4000); return; }
+      // em ganho a meta fica acima do peso atual; senão o app diria "você chegou" de imediato
+      if (c2.fasePlano === 'ganho' && !(pmeta > pesoAtual())) { toast('Peso meta: em ganho de massa, informe um valor acima do seu peso atual (' + br(pesoAtual().toFixed(1)) + ' kg).', 5000); return; }
       // a meta nunca fica abaixo de um IMC saudável mínimo
       const pesoMinSaudavel = PC.IMC_META_MIN * Math.pow(altura/100, 2);
       if (pmeta < pesoMinSaudavel - 0.05) { toast('Peso meta abaixo do mínimo saudável para a sua altura (' + br(pesoMinSaudavel.toFixed(1)) + ' kg).', 5000); return; }
@@ -3708,7 +4401,7 @@ function ligarEventos() {
       c2.altura = altura; c2.idade = idade; c2.pesoInicial = pini; c2.pesoMeta = pmeta; c2.passosMeta = passos;
       c2.sexo = $('#cfg-sexo').value;
       c2.atividade = +$('#cfg-ativ').value;
-      c2.deficit = +$('#cfg-def').value;
+      if ($('#cfg-def')) c2.deficit = +$('#cfg-def').value;       // em ganho não há seletor: o superávit vem do perfil
       c2.autoRecalc = $('#cfg-auto').value==='1';
       const nIa = $('#cfg-ianome');
       if (nIa && nIa.value.trim()) c2.iaNome = nIa.value.trim();
@@ -3725,7 +4418,12 @@ function ligarEventos() {
       const piso = PISO_KCAL[c2.sexo] || 1500;
       if (!(kcal >= piso)) { toast('Calorias: o mínimo de segurança é ' + piso + ' kcal por dia.', 4600); return; }
       const tdee = PC.gastoMisto(calcularMetas().tdee, gastoReal()).tdee;   // o mesmo gasto que a meta automática usa
-      const minimoPorDeficit = Math.round(tdee * (1 - PC.TETO_DEFICIT));
+      if (c2.fasePlano === 'ganho') {
+        // em ganho o limite é o superávit: no máximo 15% do gasto e 500 kcal acima dele
+        const maximo = Math.round(tdee + Math.min(tdee * PC.TETO_SUPERAVIT, PC.TETO_SUPERAVIT_KCAL));
+        if (kcal > maximo) { toast('Calorias: isso é um superávit grande demais para ganhar massa sem acumular gordura. O máximo é ' + maximo + ' kcal.', 5400); return; }
+      }
+      const minimoPorDeficit = c2.fasePlano === 'ganho' ? piso : Math.round(tdee * (1 - PC.TETO_DEFICIT));
       if (kcal < minimoPorDeficit) { toast('Calorias: isso é um déficit acima de ' + Math.round(PC.TETO_DEFICIT*100) + '% do seu gasto. O mínimo é ' + minimoPorDeficit + ' kcal.', 5200); return; }
       if (kcal > 8000) { toast('Calorias: valor alto demais. Confira o número.', 3600); return; }
       if (![prot, carb, gord].every(v => v >= 0 && v <= 1000)) { toast('Macros: informe valores entre 0 e 1.000 g.', 3800); return; }
@@ -3782,7 +4480,13 @@ function ligarEventos() {
       clearTimeout(gravarTimer);
       // todas as chaves do app (dados, backups internos, chaves e cache de IA), não só a principal
       try { Object.keys(localStorage).filter(k => /^ctrl[._]/.test(k)).forEach(k => localStorage.removeItem(k)); } catch(e) {}
-      FotoDB.listar().then(f=>Promise.all(f.map(x=>FotoDB.apagar(x.id)))).catch(()=>{}).then(()=>location.reload());
+      // as cópias automáticas também são dado de saúde: espera a exclusão terminar (ou travar, com outra aba aberta)
+      const apagaCopias = new Promise(ok => {
+        try { const rq = indexedDB.deleteDatabase('ctrl-copias'); rq.onsuccess = rq.onerror = () => ok(true); rq.onblocked = () => ok(false); setTimeout(() => ok(false), 2500); }
+        catch(e) { ok(true); }
+      });
+      Promise.all([apagaCopias, FotoDB.listar().then(f=>Promise.all(f.map(x=>FotoDB.apagar(x.id)))).catch(()=>{})])
+        .then(([copiasOk]) => { if (!copiasOk) alert('Seus dados foram apagados, mas as cópias automáticas ainda estão abertas em outra aba do app. Feche as outras abas e apague de novo para removê-las.'); location.reload(); });
       return;
     }
   });
@@ -3860,24 +4564,30 @@ function ligarEventos() {
     if (e.target.id==='arq') {
       const f = e.target.files[0]; if (!f) return;
       e.target.value = '';              // sem isto, escolher o mesmo arquivo de novo não dispara "change"
-      let novo;
-      try { novo = JSON.parse(await f.text()); } catch (err) { toast('Arquivo inválido: não é um backup do Controle.', 4000); return; }
-      const problema = validarBackup(novo);
-      if (problema) { toast('Backup recusado: ' + problema, 5000); return; }
-      if (!confirm('Substituir os dados atuais pelo backup? Uma cópia dos dados de hoje fica guardada neste aparelho.')) return;
-      // o que a pessoa tem agora não pode se perder se o backup estiver ruim
-      try { const atual = localStorage.getItem(CHAVE); if (atual) localStorage.setItem(CHAVE + '.antes-da-importacao', atual); } catch (err) {}
-      if (novo.cfg) delete novo.cfg.proxyUrl;
-      delete novo.sessaoAtiva;
-      saindo = true;                    // o pagehide do reload não pode regravar o estado antigo por cima
-      clearTimeout(gravarTimer);
-      try { localStorage.setItem(CHAVE, JSON.stringify(novo)); }
-      catch (err) { saindo = false; toast('Armazenamento cheio: não deu para importar. Libere espaço e tente de novo.', 5000); return; }
-      location.reload();
+      substituirDados(await f.text());
     }
   });
 
   document.addEventListener('visibilitychange', () => { if (!document.hidden) reagendar(); });
+}
+
+/* Troca TODOS os dados pelo conteúdo de um backup (arquivo importado ou cópia automática).
+   Valida a forma, pede confirmação, guarda os dados de hoje numa cópia de segurança e recarrega. */
+function substituirDados(texto, rotulo) {
+  let novo;
+  try { novo = JSON.parse(texto); } catch (err) { toast('Arquivo inválido: não é um backup do Controle.', 4000); return; }
+  const problema = validarBackup(novo);
+  if (problema) { toast('Backup recusado: ' + problema, 5000); return; }
+  if (!confirm((rotulo ? 'Restaurar ' + rotulo + '? ' : 'Substituir os dados atuais pelo backup? ') + 'Uma cópia dos dados de agora fica guardada neste aparelho.')) return;
+  // o que a pessoa tem agora não pode se perder se o backup estiver ruim
+  try { const atual = localStorage.getItem(CHAVE); if (atual) localStorage.setItem(CHAVE + '.antes-da-importacao', atual); } catch (err) {}
+  if (novo.cfg) delete novo.cfg.proxyUrl;
+  delete novo.sessaoAtiva;
+  saindo = true;                    // o pagehide do reload não pode regravar o estado antigo por cima
+  clearTimeout(gravarTimer);
+  try { localStorage.setItem(CHAVE, JSON.stringify(novo)); }
+  catch (err) { saindo = false; toast('Armazenamento cheio: não deu para restaurar. Libere espaço e tente de novo.', 5000); return; }
+  location.reload();
 }
 
 /* Backup importado vira o estado do app inteiro. Um campo com o tipo errado derrubaria
@@ -3888,6 +4598,8 @@ function validarBackup(b) {
   const data = /^\d{4}-\d{2}-\d{2}$/;
   for (const k of ['pesos','sessoes','reavaliacoes','custom','receitas','favoritos','recentes','ciclos','saberProprio','logAgente'])
     if (b[k] != null && !Array.isArray(b[k])) return `o campo "${k}" está num formato inesperado.`;
+  if (b.checkins != null && !ehObjeto(b.checkins)) return 'o campo "checkins" está num formato inesperado.';
+  if (b.suplementos != null && !ehObjeto(b.suplementos)) return 'o campo "suplementos" está num formato inesperado.';
   for (const k of ['diario','rotinas','memoria','coach'])
     if (b[k] != null && !ehObjeto(b[k])) return `o campo "${k}" está num formato inesperado.`;
   if (ehObjeto(b.diario) && Object.keys(b.diario).some(k => !data.test(k) || !ehObjeto(b.diario[k])))
@@ -3911,7 +4623,7 @@ function abrirPerfilUI(modo) {
     modo,
     inicial: modo === 'novo' ? {} : {
       nome: c.nome, sexo: c.sexo, idade: c.idade, kg: pesoAtual(), cm: c.altura,
-      objetivo: c.objetivo || (c.fasePlano === 'perda' ? 'emagrecer' : 'manter'),
+      objetivo: c.objetivo || (c.fasePlano === 'perda' ? 'emagrecer' : c.fasePlano === 'ganho' ? 'ganhar' : 'manter'),
       nivel: c.nivel || 'iniciante', dias: (c.diasTreino || []).length || 3, split: c.splitId || null, aceite: true
     },
     aoConcluir: res => aplicarPerfil(res, modo)
@@ -3944,7 +4656,8 @@ function aplicarPerfil(res, modo) {
   const n5 = (c.notif || []).find(x => x.id === 'n5'); if (n5) n5.dias = res.plano.diasSemana.slice();
 
   const metaCalc = { kcal: c.kcal, prot: c.prot, carb: c.carb, gord: c.gord };
-  if (!entrarEmFase(n.objetivo === 'manter' ? 'manutencao' : 'perda', kg).ok) entrarEmFase('manutencao', kg);
+  const faseInicial = n.objetivo === 'manter' ? 'manutencao' : n.objetivo === 'ganhar' ? 'ganho' : 'perda';
+  if (!entrarEmFase(faseInicial, kg).ok) entrarEmFase('manutencao', kg);
   // sem histórico de consumo o motor adaptativo não mexe; garante a meta do perfil
   if (!gastoReal().ok) Object.assign(c, metaCalc);
 
@@ -3980,6 +4693,11 @@ if (E._migrado) {
   setTimeout(() => toast('Dados da versão 1 migrados: '+n+' pesagens, '+s+' treinos.', 5000), 800);
 }
 gravar();
+
+/* Uma cópia por dia no aparelho (as 7 mais recentes), tirada na primeira abertura do dia. */
+if (E.cfg.perfilFeito) {
+  CopiasDB.listar().then(l => l.some(c => c.d === HOJE) ? null : CopiasDB.salvar(HOJE, textoDoBackup(E))).catch(() => {});
+}
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

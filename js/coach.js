@@ -143,14 +143,17 @@ const CAUSAS = [
 /* Resposta operacional para cada causa. Nunca julgamento. */
 function replanejar(tarefa, causa, ctx) {
   const treino = tarefa.tipo === 'treino';
+  const ganho = !!(ctx && ctx.cfg && ctx.cfg.fasePlano === 'ganho');   // em ganho de massa não há déficit para citar
   const mapa = {
     tempo: treino
       ? { acao:'encurtar', txt:'Versão curta: só os 3 primeiros exercícios, 2 séries cada. Dá 18 minutos e preserva o estímulo principal.' }
       : { acao:'simplificar', txt:'Refeição de emergência: uma fonte de proteína pronta e uma fruta. Registra em 20 segundos.' },
     esqueci: { acao:'lembrete', txt:'Vou deixar essa tarefa no topo da missão amanhã. Se você usa os alarmes do celular, esse é o horário para ajustar.' },
     cansaco: treino
-      ? { acao:'reduzir', txt:'Reduza a carga em 20% e mantenha as séries. Treino leve feito vale mais que treino pesado adiado — e em déficit a recuperação é o gargalo.' }
-      : { acao:'simplificar', txt:'Come algo simples e registra. Cansaço não é motivo para pular refeição em déficit — é justamente quando a proteína importa mais.' },
+      ? { acao:'reduzir', txt:'Reduza a carga em 20% e mantenha as séries. Treino leve feito vale mais que treino pesado adiado — ' + (ganho ? 'e a recuperação é o que transforma o superávit em músculo.' : 'e em déficit a recuperação é o gargalo.') + '' }
+      : { acao:'simplificar', txt: ganho
+          ? 'Come algo simples e registra. Cansaço não é motivo para pular refeição no ganho — sem a meta de calorias e proteína, o treino rende menos.'
+          : 'Come algo simples e registra. Cansaço não é motivo para pular refeição em déficit — é justamente quando a proteína importa mais.' },
     imprevisto: { acao:'reagendar', txt:'Acontece. Reagendado para amanhã, sem dívida acumulada.' },
     trabalho: treino
       ? { acao:'encurtar', txt:'Versão de 20 minutos, ou remarca para o próximo dia livre. Duas sessões por semana ainda sustentam massa magra.' }

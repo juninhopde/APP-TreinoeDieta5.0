@@ -527,7 +527,7 @@ ALIMENTOS.push(
   { n: 'Fígado acebolado',                 p: 26, c: 5,  g: 9,  cat: 'Carnes' },
   { n: 'Espetinho de carne',               p: 27, c: 1,  g: 15, cat: 'Carnes', un: 80, unNome: 'espeto' },
   { n: 'Espetinho de frango',              p: 26, c: 1,  g: 8,  cat: 'Carnes', un: 80, unNome: 'espeto' },
-  { n: 'Pão de alho',                      p: 7,  c: 45, g: 15, cat: 'Carnes', un: 60, unNome: 'unidade' },
+  { n: 'Pão de alho',                      p: 7,  c: 45, g: 15, cat: 'Padaria', un: 60, unNome: 'unidade' },
   { n: 'Peito de peru fatiado light',      p: 17, c: 2,  g: 1,  cat: 'Carnes', un: 15, unNome: 'fatia' },
   { n: 'Apresuntado',                      p: 14, c: 3,  g: 8,  cat: 'Carnes', un: 15, unNome: 'fatia' },
   { n: 'Frango empanado tipo tirinha',     p: 15, c: 18, g: 14, cat: 'Carnes' },

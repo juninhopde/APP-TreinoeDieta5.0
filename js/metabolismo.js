@@ -163,6 +163,50 @@ function metaPorRitmo(tdee, pesoKg, ritmoPct, pisoKcal, alturaCm) {
   };
 }
 
+/* Meta calórica de GANHO DE MASSA (superávit controlado) a partir do gasto medido.
+   Ritmo por nível (PC.RITMO_GANHO), com as mesmas travas de perfil-core.js: superávit
+   nunca acima de PC.TETO_SUPERAVIT (15%) do gasto nem de PC.TETO_SUPERAVIT_KCAL (500).
+   Sinal: `deficit` e `ritmoReal` saem NEGATIVOS (ganho); `superavit` é positivo.
+   IMC alto (PC.IMC_MAX_GANHO) ou gasto tão baixo que o piso passaria do teto: devolve
+   manutenção com `bloqueado: 'imc_alto' | 'piso'` e uma `nota`. */
+function metaPorGanho(tdee, pesoKg, nivel, pisoKcal, alturaCm) {
+  const piso = pisoKcal || 1500;
+  // gasto ou peso inválidos (cadastro incompleto) não podem virar "NaN kcal" na meta
+  if (!isFinite(tdee) || !(tdee > 0) || !(pesoKg > 0))
+    return { kcal: piso, deficit: 0, superavit: 0, limitado: true, ritmoReal: 0, bloqueado: 'dados',
+             nota: 'Faltam dados (peso, idade ou atividade) para calcular o superávit. A meta fica no piso de segurança.' };
+  const manutencao = (motivo, nota) => {
+    const kcal = Math.max(piso, Math.round(tdee / 10) * 10);
+    const acima = kcal - Math.round(tdee);
+    return { kcal, deficit: 0, superavit: 0, limitado: true, ritmoReal: 0, bloqueado: motivo,
+             nota: nota + (acima > 0 ? ' A meta fica no piso de segurança (' + kcal + ' kcal), ' + acima + ' kcal acima do gasto.' : '') };
+  };
+  if (alturaCm) {
+    const gp = PC.ganhoPermitido(pesoKg, alturaCm);
+    if (!gp.ok) return manutencao('imc_alto', gp.texto);
+  }
+  if (tdee * (1 + PC.TETO_SUPERAVIT) < piso)
+    return manutencao('piso', 'Seu gasto (' + Math.round(tdee) + ' kcal) é tão baixo que o piso de segurança (' + piso + ' kcal) passaria do teto de superávit: não há espaço seguro para ganho.');
+
+  const ritmo = PC.RITMO_GANHO[nivel] || PC.RITMO_GANHO.intermediario;   // nível desconhecido: o ritmo mais cauteloso
+  const bruto = (ritmo * pesoKg * KCAL_POR_KG) / 7;
+  const teto = Math.min(tdee * PC.TETO_SUPERAVIT, PC.TETO_SUPERAVIT_KCAL);
+  const sup = Math.min(bruto, teto);
+  let k = Math.round((tdee + sup) / 10) * 10;
+  if (k - tdee > sup + 1e-9) k -= 10;                // arredondar nunca empurra o superávit para cima do teto
+  const kcal = Math.max(piso, k);
+  const superavit = Math.floor(kcal - tdee + 1e-9);
+  const ritmoReal = +(((tdee - kcal) * 7) / (KCAL_POR_KG * pesoKg) * 100).toFixed(2);   // negativo: ganho, em % do peso por semana
+  return {
+    kcal,
+    deficit: -superavit,
+    superavit,
+    limitado: bruto > teto,
+    ritmoReal,
+    nota: 'Superávit controlado de ' + superavit + ' kcal por dia, cerca de ' + String(Math.abs(ritmoReal).toFixed(2)).replace('.', ',') + '% do peso por semana.'
+  };
+}
+
 const RITMOS = [
   { v: 0.005,  rot: '0,5% por semana — conservador' },
   { v: 0.0075, rot: '0,75% por semana — recomendado' },

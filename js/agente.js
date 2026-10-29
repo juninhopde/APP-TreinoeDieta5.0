@@ -145,10 +145,10 @@ const FERRAMENTAS = {
   },
 
   mudar_fase: {
-    desc: 'Muda a fase do plano: perda, manutencao ou recuperacao.',
-    args: { fase: 'perda | manutencao | recuperacao' },
+    desc: 'Muda a fase do plano: perda, manutencao, recuperacao ou ganho (ganho de massa, em superávit controlado).',
+    args: { fase: 'perda | manutencao | recuperacao | ganho' },
     politica: POLITICA.confirma,
-    valida: a => ['perda','manutencao','recuperacao'].includes(a.fase) ? null : 'Fase desconhecida.',
+    valida: a => ['perda','manutencao','recuperacao','ganho'].includes(a.fase) ? null : 'Fase desconhecida.',
     exec: (a, api) => api.mudarFase(a.fase)
   },
 
@@ -242,7 +242,7 @@ const FERRAMENTAS = {
   ajustar_meta_livre: {
     desc: 'NÃO EXISTE. A meta calórica sai do motor de gasto e dos limites de segurança.',
     politica: POLITICA.proibido,
-    motivo: 'Meta abaixo do piso ou déficit acima de 30% do gasto não são permitidos por nenhum caminho, inclusive por pedido direto.'
+    motivo: 'Meta abaixo do piso, déficit acima de 25% do gasto ou superávit acima de 15% do gasto (ou de 500 kcal) não são permitidos por nenhum caminho, inclusive por pedido direto.'
   },
   apagar_dados: {
     desc: 'NÃO EXISTE para o assistente. Só a pessoa apaga dados, em Ajustes.',

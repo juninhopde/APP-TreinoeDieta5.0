@@ -66,7 +66,7 @@ body.escuro .topo { background: #0C0F11; color: var(--tinta); }
   background: none; border: 1px solid #3A4245; color: #8E9794;
   font-family: var(--mono); font-size: 10px; padding: 3px 8px; letter-spacing: .06em;
 }
-.topo.compacto .anel-linha, .topo.compacto #barras { display: none; }
+.topo.compacto .anel-linha, .topo.compacto #barras, .topo.compacto #pilares { display: none; }
 .topo.compacto .topo-tit { margin-bottom: 0; font-size: 21px; }
 .topo-tit {
   font-family: var(--disp); font-weight: 500; font-size: 25px;
@@ -80,6 +80,24 @@ body.escuro .topo { background: #0C0F11; color: var(--tinta); }
 .anel-kcal { font-family: var(--mono); font-size: 27px; font-weight: 500; line-height: 1; }
 .anel-rot { font-family: var(--disp); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: #8E9794; }
 .anel-sub { font-family: var(--mono); font-size: 11px; color: #8E9794; margin-top: 5px; }
+
+.anel-bal { display: inline-block; margin-top: 6px; padding: 2px 8px; font-family: var(--disp); font-size: 11px;
+  letter-spacing: .08em; text-transform: uppercase; border: 1px solid currentColor; }
+.anel-bal[hidden] { display: none; }
+.bal-deficit { color: #6FBF9B; }
+.bal-superavit { color: #E8A33D; }
+.bal-manutencao { color: #9DB7E0; }
+
+/* anéis por pilar: cada domínio tem a sua cor, e o nome e o número ficam escritos (a cor nunca é a única pista) */
+.pilares { margin: 0 0 12px; }
+.pil-dia { font-family: var(--mono); font-size: 12px; color: #B8C0BD; margin-bottom: 8px; }
+.pil-dia b { font-size: 16px; font-weight: 500; color: #E4E5DF; }
+.pil-dia span { margin-left: 6px; color: #8E9794; }
+.pil-lista { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; }
+.pil { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.pil svg { width: 38px; height: 38px; }
+.pil-rot { font-family: var(--disp); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: #8E9794; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pil-pct { font-family: var(--mono); font-size: 12px; color: #E4E5DF; }
 
 .macro { margin-bottom: 9px; }
 .macro:last-child { margin-bottom: 0; }
@@ -596,6 +614,34 @@ body.escuro .chat { background: #121618; }
   width: 24px; height: 24px; border: 1px solid var(--linha); background: none;
   color: var(--tinta2); font-family: var(--mono); font-size: 13px; line-height: 1; padding: 0;
 }
+/* abas do treino */
+.abas { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 8px; padding-bottom: 2px; }
+.aba { flex: 0 0 auto; min-height: 44px; padding: 6px 14px; border: 1px solid var(--linha); background: var(--painel);
+  font-family: var(--disp); font-size: 14px; letter-spacing: .06em; text-transform: uppercase; color: var(--tinta);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.aba[aria-selected="true"] { background: var(--tinta); color: var(--concreto); border-color: var(--tinta); }
+.aba-selo { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; padding: 0 5px; background: var(--oxido); color: #fff; }
+.aba-selo.feito { background: var(--sinal); }
+.aba-painel { margin-top: 0; }
+
+/* adesão por pilar e água do mês */
+.ad-tab { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ad-tab th, .ad-tab td { padding: 6px 4px; text-align: left; border-top: 1px dotted var(--linha); font-weight: 400; }
+.ad-tab thead th { font-family: var(--disp); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--tinta2); border-top: 0; }
+.ad-tab tbody th, .ad-tab tfoot th { font-weight: 500; white-space: nowrap; }
+.ad-tab th i { display: inline-block; width: 9px; height: 9px; margin-right: 7px; }
+.ad-tab td { font-family: var(--mono); }
+.ad-tab tfoot th, .ad-tab tfoot td { border-top: 1px solid var(--linha); font-weight: 500; }
+.ad-barra { width: 28%; }
+.ad-barra span { display: block; height: 6px; background: var(--linha); }
+.graf-agua { width: 100%; height: auto; display: block; margin: 4px 0 6px; }
+
+.tl-filtros { margin-bottom: 6px; gap: 6px; }
+.tl-filtros .fb-chip { padding: 5px 10px; min-height: 36px; font-size: 12.5px; }
+.tarefa.dom-dieta       { box-shadow: inset 3px 0 0 #4FBF95; padding-left: 9px; }
+.tarefa.dom-treino      { box-shadow: inset 3px 0 0 #E0703F; padding-left: 9px; }
+.tarefa.dom-agua        { box-shadow: inset 3px 0 0 #6E9AD6; padding-left: 9px; }
+.tarefa.dom-suplementos { box-shadow: inset 3px 0 0 #B79CE8; padding-left: 9px; }
 .tarefa.concluida .tar-ck { background: var(--sinal); border-color: var(--sinal); color: #fff; }
 .tarefa.perdida .tar-ck { border-color: var(--oxido); color: var(--oxido); }
 .tarefa.reagendada .tar-ck { border-color: var(--frio); color: var(--frio); }
@@ -859,3 +905,45 @@ html.escuro { color-scheme: dark; }
   .gaveta { max-width: 600px; max-height: 84vh; border: 1px solid var(--linha); border-top: 3px solid var(--oxido); }
   .onb-corpo { max-width: 600px; }
 }
+
+/* ══ 5.2 · hábitos, relatório e impressão ═════════════ */
+.rec-boa { color: var(--sinal); }
+.rec-media { color: var(--carb); }
+.rec-baixa { color: var(--oxido); }
+.seq { border-left: 4px solid var(--carb); }
+.checkin-ok { border-left: 4px solid var(--sinal); }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+
+#relatorio { display: none; }
+.rel { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; color: #111; background: #fff; max-width: 720px; margin: 0 auto; padding: 8px; }
+.rel h1 { font-size: 24px; margin: 0 0 2px; }
+.rel h2 { font-size: 15px; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: .05em; }
+.rel-sub { color: #444; margin: 0 0 14px; }
+.rel table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.rel th { text-align: left; font-weight: 600; padding: 7px 8px; border-bottom: 1px solid #ccc; width: 46%; }
+.rel td { padding: 7px 8px; border-bottom: 1px solid #ccc; }
+.rel ul { margin: 0; padding-left: 20px; font-size: 14px; }
+.rel p { font-size: 14px; }
+.rel-nota { color: #555; font-size: 11.5px !important; margin-top: 18px; }
+.rel-treino th.rel-n, .rel-treino td.rel-n { width: 28px; text-align: center; }
+.rel-treino th { width: auto; }
+.rel-treino tr { page-break-inside: avoid; break-inside: avoid; }
+.rel-gm { color: #555; font-size: 12px; }
+
+/* comparar fotos */
+#cmp-a, #cmp-b { font-size: 12px; padding-left: 6px; padding-right: 2px; }
+.comparar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.comparar figure { margin: 0; }
+.comparar figcaption { font-family: var(--mono); font-size: 11px; color: var(--tinta2); margin-bottom: 4px; line-height: 1.35; }
+.comparar figcaption b { font-family: var(--disp); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--tinta); }
+.comparar img { width: 100%; height: auto; max-height: 55vh; object-fit: contain; background: var(--concreto); display: block; }
+
+@media print {
+  @page { margin: 14mm; }
+  html, body { background: #fff !important; }
+  #raiz, .nav, .fab, .cron, .fundo, .onb, .toast { display: none !important; }
+  #relatorio, #relatorio[hidden] { display: block !important; }
+  #relatorio[hidden]:empty { display: none !important; }
+}
+.fb-prot { border-left-color: var(--prot); }
+.fase-chip.fb-prot { background: var(--prot); color: #12130F; }

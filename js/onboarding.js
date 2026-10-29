@@ -90,15 +90,18 @@ function corpo() {
 
   if (passo === 3) {
     const pp = (D.kg && D.cm) ? PC.perdaPermitida(+D.kg, +D.cm) : null;
+    const gp = (D.kg && D.cm) ? PC.ganhoPermitido(+D.kg, +D.cm) : null;
     const aviso = (pp && !pp.ok && D.objetivo === 'emagrecer')
-      ? `<div class="alerta ocre"><div class="alerta-tit">Atenção</div><p>${esc(pp.texto)}</p></div>` : '';
+      ? `<div class="alerta ocre"><div class="alerta-tit">Atenção</div><p>${esc(pp.texto)}</p></div>`
+      : (gp && D.objetivo === 'ganhar' && gp.texto)
+      ? `<div class="alerta ocre"><div class="alerta-tit">Atenção</div><p>${esc(gp.texto)}</p></div>` : '';
     return `
     <h2 class="onb-h"${TIT}>Seu objetivo</h2>
-    <p class="onb-sub">Define se o plano começa com déficit calórico ou em manutenção.</p>
+    <p class="onb-sub">Define se o plano começa com déficit calórico, em manutenção ou com superávit.</p>
     <div class="onb-lista">
       ${opt('data-obj', 'emagrecer', D.objetivo === 'emagrecer', 'Emagrecer', 'Déficit moderado, com proteína alta para preservar músculo.')}
       ${opt('data-obj', 'manter', D.objetivo === 'manter', 'Manter e ganhar força', 'Calorias no nível do gasto. Bom para recomposição corporal.')}
-      <button type="button" class="onb-opt" disabled><b>Ganhar massa <span class="onb-tag off">em breve</span></b><small>Ainda não disponível. Por enquanto o app monta planos para emagrecer ou para manter.</small></button>
+      ${opt('data-obj', 'ganhar', D.objetivo === 'ganhar', 'Ganhar massa', 'Superávit pequeno e controlado, proteína alta e treino de força. Ritmo de 0,25% a 0,4% do peso por semana.')}
     </div>${aviso}`;
   }
 
@@ -129,7 +132,10 @@ function corpo() {
   const n = r.nutri, pl = r.plano;
   const seq = pl.diasSemana.map((d, i) => ({ d, l: pl.letras[i % pl.letras.length] }));
   const dias = [0,1,2,3,4,5,6].map(d => { const s = seq.find(x => x.d === d); return '<div class="onb-d ' + (s ? 'on' : '') + '"><b>' + (s ? s.l : '·') + '</b>' + DIAS_ROT[d] + '</div>'; }).join('');
-  const ritmo = n.objetivo === 'emagrecer' ? 'déficit de ' + n.deficit + ' kcal/dia (' + br((n.ritmoPct * 100).toFixed(2)) + '% do peso por semana)' : 'sem déficit';
+  const ganha = n.objetivo === 'ganhar';
+  const ritmo = n.objetivo === 'emagrecer' ? 'déficit de ' + n.deficit + ' kcal/dia (' + br((n.ritmoPct * 100).toFixed(2)) + '% do peso por semana)'
+              : ganha ? 'superávit de ' + n.superavit + ' kcal/dia, cerca de ' + br((Math.abs(n.ritmoPct) * 100).toFixed(2)) + '% do peso por semana'
+              : n.forcado === 'imc_alto' ? 'manutenção, sem superávit' : 'sem déficit';
   const barra = x => {
     const f = x.faixa, topo = Math.max(f.mrv * 1.15, x.series * 1.05, 10), pc = v => Math.min(100, v / topo * 100);
     const seg = (a, b, cor) => b > a ? '<i style="left:' + pc(a) + '%;width:' + (pc(b) - pc(a)) + '%;background:' + cor + '"></i>' : '';
@@ -148,16 +154,18 @@ function corpo() {
         <div><div class="kpi-num" style="color:var(--carb)">${n.carb}<small>g</small></div><div class="kpi-rot">Carboidrato</div></div>
         <div><div class="kpi-num" style="color:var(--gord)">${n.gord}<small>g</small></div><div class="kpi-rot">Gordura</div></div></div>
       <p class="nota">Água ${br((n.agua / 1000).toFixed(1))} L · fibra ${n.fibra} g · IMC ${br(n.imc)}<br>
-      Repouso ${n.tmb} kcal × atividade ${br(n.fator)} = ${n.tdee} kcal · ${ritmo}${n.objetivo === 'emagrecer' ? ' · meta inicial ' + br(n.metaInicial) + ' kg' : ''}</p></div>
+      Repouso ${n.tmb} kcal × atividade ${br(n.fator)} = ${n.tdee} kcal · ${ritmo}${n.objetivo === 'emagrecer' || ganha ? ' · meta inicial ' + br(n.metaInicial) + ' kg' : ''}</p></div>
     <div class="bloco"><div class="bloco-tit"><span>${esc(pl.nome)}</span><b>${pl.dias} dias</b></div>
       <div class="onb-semana">${dias}</div>
       ${pl.avaliacao.avisos.map(a => '<div class="alerta ocre" style="margin-top:8px"><div class="alerta-tit">Considere</div><p>' + esc(a) + '</p></div>').join('')}
       ${pl.letras.map(l => '<p class="onb-rotina"><b>' + esc(pl.rotinas[l].nome) + '</b><br>' + pl.rotinas[l].ex.map(e => esc(e.n) + ' ' + e.series + '×' + e.repMin + (e.repMax !== e.repMin ? '–' + e.repMax : '')).join(' · ') + '</p>').join('')}</div>
     <div class="bloco"><div class="bloco-tit"><span>Volume por músculo</span><b>séries/semana</b></div>
       ${pl.painel.map(barra).join('')}
-      <p class="nota">Sinergistas contam meia série (o supino conta para o tríceps). Em déficit, o topo da faixa produtiva cai 15%. São faixas de trabalho, não lei.</p></div>
+      <p class="nota">Sinergistas contam meia série (o supino conta para o tríceps).${ganha ? '' : ' Em déficit, o topo da faixa produtiva cai 15%.'} São faixas de trabalho, não lei.</p></div>
     <div class="bloco"><div class="bloco-tit"><span>Base do plano</span></div>
-      <p class="nota" style="margin:0">Proteína de 1,6 a 2,2 g/kg (mais alta em déficit); cada músculo 2× por semana rende mais que 1×; mais séries semanais até um teto geram mais hipertrofia; perda de 0,5–1% do peso por semana. Déficit limitado a ${Math.round(PC.TETO_DEFICIT * 100)}% do gasto e piso de calorias por sexo são regras de segurança do app. Esses valores são referências de literatura, não uma prescrição individual.</p></div>`;
+      <p class="nota" style="margin:0">${ganha
+        ? 'Proteína de 1,6 a 2,2 g/kg (1,8 g/kg neste plano); cada músculo 2× por semana rende mais que 1×; mais séries semanais até um teto geram mais hipertrofia; ganho de 0,25 a 0,4% do peso por semana, o que limita o acúmulo de gordura. Superávit limitado a ' + Math.round(PC.TETO_SUPERAVIT * 100) + '% do gasto e a ' + PC.TETO_SUPERAVIT_KCAL + ' kcal por dia são regras de segurança do app. Esses valores são referências de literatura, não uma prescrição individual.'
+        : 'Proteína de 1,6 a 2,2 g/kg (mais alta em déficit); cada músculo 2× por semana rende mais que 1×; mais séries semanais até um teto geram mais hipertrofia; perda de 0,5–1% do peso por semana. Déficit limitado a ' + Math.round(PC.TETO_DEFICIT * 100) + '% do gasto e piso de calorias por sexo são regras de segurança do app. Esses valores são referências de literatura, não uma prescrição individual.'}</p></div>`;
 }
 
 /* ── ciclo de tela ──────────────────────────────────── */

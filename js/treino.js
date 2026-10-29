@@ -21,7 +21,7 @@ const FASES = [
 
   { id: 'inten', nome: 'Intensificação', sem: [8, 9, 10, 11],
     series: 3, repMin: 8, repMax: 12, rirAlvo: 1, descanso: 120, fatorCarga: 1, fatorSeries: 1,
-    foco: 'Manter estímulo de força com déficit calórico já acumulado.',
+    foco: 'Manter o estímulo de força com a fadiga já acumulada.',
     nota: 'Menos reps, mais carga, descanso maior. É o que protege massa magra.' },
 
   { id: 'deload', nome: 'Deload', sem: [12],
